@@ -1,44 +1,91 @@
 const { useState, useEffect, useMemo, useRef } = React;
+const COMPETITIONS_API_HOST = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
+const COMPETITIONS_API = 'http://' + COMPETITIONS_API_HOST + ':8001/api/competitions/';
 
-// SVG Icon set for instant, rock-solid rendering without external dependency delay
+function mapCompetitionRecord(record) {
+  const category = (window.TALENTSPHERE_DATA?.categories || []).find(item => item.id === record.category);
+  const modeLabels = { online: 'Online', in_person: 'On-site', hybrid: 'Hybrid' };
+  const date = value => value ? new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : '';
+  return {
+    id: record.id,
+    title: record.title,
+    description: record.description,
+    organizer: record.organizer,
+    hostOrganization: record.host_organization,
+    hostType: record.host_type,
+    university: record.university_name,
+    institutionAffiliation: record.institution_affiliation,
+    type: category?.name || 'CSE Competition',
+    category: record.category,
+    mode: modeLabels[record.mode] || record.mode,
+    location: record.location,
+    targetDate: record.event_start_date,
+    eventEndDate: record.event_end_date,
+    date: date(record.event_start_date),
+    deadline: record.registration_deadline,
+    registrationUrl: record.registration_url,
+    sourceUrl: record.source_url,
+    submissionSource: record.submission_source,
+    sourceName: record.source_name,
+    importedAt: record.imported_at,
+    sourceCheckedAt: record.source_checked_at,
+    eligibility: record.eligibility,
+    teamSize: record.team_size,
+    prizePool: record.prize_pool,
+    registrationFee: record.registration_fee === null ? '' : `${record.registration_fee_currency} ${record.registration_fee}`,
+    tags: Array.isArray(record.tags) ? record.tags : [],
+    status: record.registration_status,
+    publicationStatus: 'published',
+    isSample: false,
+    publishedAt: record.published_at
+  };
+}
+
+async function getCompetitionPage(params, signal) {
+  const response = await fetch(COMPETITIONS_API + '?' + params.toString(), { signal, headers: { Accept: 'application/json' } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(body.detail || 'The competition service could not load published listings.');
+  return body;
+}
+
+// ==========================================
+// 1. SVG ICON SYSTEM
+// ==========================================
 const SVG_ICONS = {
+  smartphone: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect x="5" y="2" width="14" height="20" rx="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>`,
+  gamepad2: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M6 12h4m-2-2v4"></path><path d="M15 11h.01M18 13h.01"></path><path d="M7 6h10a4 4 0 0 1 3.9 3.1l1 4.5A3 3 0 0 1 17 17l-2-2H9l-2 2a3 3 0 0 1-4.9-3.4l1-4.5A4 4 0 0 1 7 6Z"></path></svg>`,
+  cpu: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect x="5" y="5" width="14" height="14" rx="2"></rect><path d="M9 9h6v6H9zM9 1v4m6-4v4m-6 14v4m6-4v4M1 9h4m-4 6h4m14-6h4m-4 6h4"></path></svg>`,
   search: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`,
   trophy: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"></path><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"></path><path d="M4 22h16"></path><path d="M10 14.66V17c0 .55-.45 1-1 1H7v2h10v-2h-2c-.55 0-1-.45-1-1v-2.34"></path><path d="M6 4h12v7a6 6 0 0 1-12 0V4z"></path></svg>`,
   graduationcap: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M22 10v6M2 10l10-5 10 5-10 5z"></path><path d="M6 12v5c3 3 9 3 12 0v-5"></path></svg>`,
   users: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M22 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`,
+  user: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>`,
   flame: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 3.5z"></path></svg>`,
   code2: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>`,
   zap: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg>`,
   rocket: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>`,
   brain: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z"></path><path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z"></path><path d="M12 3v18"></path></svg>`,
-  globe: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>`,
-  bot: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect width="18" height="12" x="3" y="6" rx="2"></rect><circle cx="9" cy="12" r="1"></circle><circle cx="15" cy="12" r="1"></circle><path d="M12 2v4"></path><path d="M2 14h1"></path><path d="M21 14h1"></path><path d="M15 18v2"></path><path d="M9 18v2"></path></svg>`,
-  smartphone: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"></rect><path d="M12 18h.01"></path></svg>`,
-  shieldalert: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`,
-  coins: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="8" cy="8" r="6"></circle><path d="M18.09 10.37A6 6 0 1 1 10.34 18"></path><path d="M7 6h1v4"></path><path d="m16.71 13.88.7.71-2.82 2.82"></path></svg>`,
-  userplus: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><line x1="19" y1="8" x2="19" y2="14"></line><line x1="22" y1="11" x2="16" y2="11"></line></svg>`,
-  pluscircle: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>`,
+  briefcase: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect width="20" height="14" x="2" y="7" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg>`,
+  building2: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"></path><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"></path><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"></path><path d="M10 6h4"></path><path d="M10 10h4"></path><path d="M10 14h4"></path><path d="M10 18h4"></path></svg>`,
+  eye: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>`,
+  eyehide: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="m2 2 20 20"></path><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"></path><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c7 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"></path><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3 7 10 7a9.74 9.74 0 0 0 5.39-1.61"></path></svg>`,
   arrowright: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>`,
-  checkcircle: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>`,
-  checkcircle2: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>`,
-  terminal: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>`,
-  copy: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>`,
+  arrowleft: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><line x1="19" y1="12" x2="5" y2="12"></line><polyline points="12 19 5 12 12 5"></polyline></svg>`,
   check: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><polyline points="20 6 9 17 4 12"></polyline></svg>`,
-  menu: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>`,
+  checkcircle2: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>`,
   x: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>`,
+  menu: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="6" x2="20" y2="6"></line><line x1="4" y1="18" x2="20" y2="18"></line></svg>`,
   calendar: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`,
   mappin: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"></path><circle cx="12" cy="10" r="3"></circle></svg>`,
   clock: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>`,
-  bookmark: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"></path></svg>`,
   layoutgrid: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect width="7" height="7" x="3" y="3" rx="1"></rect><rect width="7" height="7" x="14" y="3" rx="1"></rect><rect width="7" height="7" x="14" y="14" rx="1"></rect><rect width="7" height="7" x="3" y="14" rx="1"></rect></svg>`,
-  chevronright: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><polyline points="9 18 15 12 9 6"></polyline></svg>`,
-  usercheck: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><polyline points="16 11 18 13 22 9"></polyline></svg>`,
-  radio: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="12" cy="12" r="2"></circle><path d="M16.24 7.76a6 6 0 0 1 0 8.49m-8.48-.01a6 6 0 0 1 0-8.49m11.31-2.82a10 10 0 0 1 0 14.14m-14.14 0a10 10 0 0 1 0-14.14"></path></svg>`,
-  send: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>`,
-  mail: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><rect width="20" height="16" x="2" y="4" rx="2"></rect><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"></path></svg>`,
-  facebook: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"></path></svg>`,
+  trendingup: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"></polyline><polyline points="16 7 22 7 22 13"></polyline></svg>`,
+  palette: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"></circle><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"></circle><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"></circle><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"></circle><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.563-2.512 5.563-5.563C22 6.5 17.5 2 12 2Z"></path></svg>`,
+  github: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>`,
   linkedin: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect width="4" height="12" x="2" y="9"></rect><circle cx="4" cy="4" r="2"></circle></svg>`,
-  github: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>`
+  sparkles: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"></path></svg>`,
+  shieldcheck: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"></path><path d="m9 12 2 2 4-4"></path></svg>`,
+  info: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg>`
 };
 
 const Icon = ({ name, className = "w-5 h-5", ...props }) => {
@@ -55,7 +102,6 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
     );
   }
 
-  // Fallback generic icon
   return (
     <span className={`inline-flex items-center justify-center shrink-0 text-cyan-400 ${className}`} {...props}>
       ●
@@ -63,57 +109,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
   );
 };
 
-// Countdown Timer Component with live ticking
-const CountdownTimer = ({ targetDate, initialDays }) => {
-  const [timeLeft, setTimeLeft] = useState({
-    days: initialDays || 12,
-    hours: 14,
-    minutes: 32,
-    seconds: 45
-  });
-
-  useEffect(() => {
-    const calculateTime = () => {
-      if (!targetDate) return;
-      const difference = +new Date(targetDate) - +new Date();
-      if (difference > 0) {
-        setTimeLeft({
-          days: Math.floor(difference / (1000 * 60 * 60 * 24)),
-          hours: Math.floor((difference / (1000 * 60 * 60)) % 24),
-          minutes: Math.floor((difference / 1000 / 60) % 60),
-          seconds: Math.floor((difference / 1000) % 60)
-        });
-      }
-    };
-
-    calculateTime();
-    const timer = setInterval(calculateTime, 1000);
-    return () => clearInterval(timer);
-  }, [targetDate]);
-
-  return (
-    <div className="flex items-center gap-1.5 font-mono-code text-xs">
-      <div className="bg-slate-900/90 border border-cyan-500/30 rounded px-1.5 py-1 text-cyan-300 font-bold">
-        {String(timeLeft.days).padStart(2, '0')}d
-      </div>
-      <span className="text-cyan-500/50">:</span>
-      <div className="bg-slate-900/90 border border-cyan-500/30 rounded px-1.5 py-1 text-cyan-300 font-bold">
-        {String(timeLeft.hours).padStart(2, '0')}h
-      </div>
-      <span className="text-cyan-500/50">:</span>
-      <div className="bg-slate-900/90 border border-cyan-500/30 rounded px-1.5 py-1 text-cyan-300 font-bold">
-        {String(timeLeft.minutes).padStart(2, '0')}m
-      </div>
-      <span className="text-cyan-500/50">:</span>
-      <div className="bg-slate-900/90 border border-cyan-500/30 rounded px-1.5 py-1 text-cyan-300 font-bold text-amber-400">
-        {String(timeLeft.seconds).padStart(2, '0')}s
-      </div>
-    </div>
-  );
-};
-
-// Navbar Component
-const Navbar = ({ onOpenAuth, onOpenSubmit, onOpenSearch, onNavigateSection }) => {
+const Navbar = ({ onOpenAuth, onOpenSubmit, onNavigateSection, currentPath = '/' }) => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -125,724 +121,379 @@ const Navbar = ({ onOpenAuth, onOpenSubmit, onOpenSearch, onNavigateSection }) =
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  const navItems = [
-    { label: "Home", href: "#hero" },
-    { label: "Competitions", href: "#competitions" },
-    { label: "Categories", href: "#categories" },
-    { label: "Universities", href: "#universities" },
-    { label: "Leaderboard", href: "#hero" },
-    { label: "Resources", href: "#competitions" }
-  ];
-
   return (
-    <nav className={`fixed top-0 left-0 right-0 z-50 transition-all duration-300 ${
+    <header className={`fixed top-0 left-0 right-0 z-40 transition-all duration-300 ${
       scrolled 
-        ? "bg-[#07090e]/95 backdrop-blur-md border-b border-slate-800/80 shadow-2xl py-3" 
-        : "bg-[#07090e]/60 backdrop-blur-sm py-4 border-b border-white/5"
+        ? "bg-[#060911]/95 backdrop-blur-md border-b border-slate-800/80 shadow-2xl py-3" 
+        : "bg-[#060911]/70 backdrop-blur-sm py-4 border-b border-white/5"
     }`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between">
           
-          {/* Logo with Bangladesh-inspired motif */}
-          <div className="flex items-center gap-3 cursor-pointer group" onClick={() => onNavigateSection('hero')}>
-            <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-600 via-blue-600 to-indigo-600 p-0.5 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
-              <div className="w-full h-full bg-[#090d16] rounded-[10px] flex items-center justify-center relative overflow-hidden">
-                <div className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full blur-[1px] opacity-80"></div>
-                <div className="absolute top-1 left-1 w-2.5 h-2.5 bg-emerald-500/50 rounded-full blur-[2px]"></div>
-                <span className="font-mono-code font-extrabold text-cyan-400 text-lg">&lt;/&gt;</span>
+          {/* Brand Logo */}
+          <div 
+            className="flex items-center gap-2.5 cursor-pointer group"
+            onClick={() => onNavigateSection('hero')}
+            id="nav-logo" role="link" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") onNavigateSection("hero"); }}
+          >
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 p-0.5 shadow-lg shadow-cyan-500/20 group-hover:scale-105 transition-transform">
+              <div className="w-full h-full bg-[#090d18] rounded-[10px] flex items-center justify-center">
+                <Icon name="zap" className="w-5 h-5 text-cyan-400" />
               </div>
             </div>
-            
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="font-heading font-black text-2xl tracking-tight text-white">
-                  Code<span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 via-blue-400 to-indigo-400">BD</span>
-                </span>
-                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono-code font-bold bg-emerald-950/80 text-emerald-400 border border-emerald-500/40">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 mr-1 animate-ping"></span>
-                  BD 🇧🇩
-                </span>
-              </div>
-              <span className="text-[10px] tracking-wider uppercase text-slate-400 font-semibold -mt-1 hidden sm:block">
-                National CSE Contest Hub
+            <div>
+              <span className="font-heading font-black text-xl tracking-tight text-white flex items-center gap-1">
+                Talent{' '}<span className="text-cyan-400">Square</span>
+              </span>
+              <span className="text-[10px] text-slate-400 block -mt-1 tracking-wider uppercase font-semibold">
+                Compete &middot; Recruit &middot; Rank
               </span>
             </div>
           </div>
 
-          {/* Desktop Navigation Links */}
-          <div className="hidden md:flex items-center gap-1 bg-slate-900/70 p-1.5 rounded-full border border-slate-800/80 backdrop-blur-md">
-            {navItems.map((item) => (
-              <a
-                key={item.label}
-                href={item.href}
-                onClick={(e) => {
-                  e.preventDefault();
-                  onNavigateSection(item.href.replace('#', ''));
-                }}
-                className="px-4 py-1.5 rounded-full text-sm font-medium text-slate-300 hover:text-white hover:bg-slate-800/80 transition-all"
-              >
-                {item.label}
-              </a>
-            ))}
-          </div>
-
-          {/* Right Action Buttons */}
-          <div className="hidden lg:flex items-center gap-3">
-            <button
-              onClick={onOpenSearch}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-cyan-300 border border-slate-800 text-xs transition-all"
-              title="Quick search competitions (Ctrl+K)"
+          {/* Center Navigation Links */}
+          <nav className="hidden xl:flex items-center gap-4 text-sm font-medium text-slate-300">
+            <button onClick={() => onNavigateSection('hero')} className="hover:text-cyan-400 transition-colors cursor-pointer" aria-current={currentPath === '/' ? 'page' : undefined}>Home</button>
+            <button 
+              onClick={() => onNavigateSection('competitions')} 
+              className={`hover:text-cyan-400 transition-colors cursor-pointer ${currentPath.startsWith('/competitions') ? 'text-cyan-300' : ''}`}
+              id="nav-link-explore"
+              aria-current={currentPath.startsWith('/competitions') ? 'page' : undefined}
             >
-              <Icon name="Search" className="w-3.5 h-3.5" />
-              <span>Search contests...</span>
-              <kbd className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-mono-code text-slate-400 border border-slate-700">⌘K</kbd>
+              Competitions
             </button>
-
-            <button
-              onClick={onOpenSubmit}
-              className="px-3.5 py-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 border border-slate-700/80 text-xs font-semibold hover:border-slate-600 transition-all flex items-center gap-1.5"
+            <button onClick={() => onNavigateSection('participant')} className="hover:text-cyan-400 transition-colors cursor-pointer" aria-current={currentPath === '/workspace' ? 'page' : undefined}>Participants</button>
+            <button 
+              onClick={() => onNavigateSection('jobfairs')} 
+              className="hover:text-cyan-400 transition-colors cursor-pointer flex items-center gap-1.5"
+              id="nav-link-jobfair"
+              aria-current={currentPath.startsWith('/job-fairs') ? 'page' : undefined}
             >
-              <Icon name="PlusCircle" className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Host Contest</span>
+              Job Fair
+              <span className="px-1.5 py-0.5 text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30 rounded-full">
+                Hiring
+              </span>
             </button>
+            <button 
+              onClick={() => onNavigateSection('rankings')} 
+              className="hover:text-cyan-400 transition-colors cursor-pointer"
+              id="nav-link-rankings"
+              aria-current={currentPath === '/rankings' ? 'page' : undefined}
+            >
+              Rankings
+            </button>
+            <button 
+              onClick={onOpenSubmit} 
+              className="hover:text-cyan-400 transition-colors cursor-pointer flex items-center gap-1 text-slate-200"
+              id="nav-link-submit"
+              aria-current={currentPath === '/organizer/competitions/new' ? 'page' : undefined}
+            >
+              <Icon name="rocket" className="w-3.5 h-3.5 text-cyan-400" />
+              Submit Competition
+            </button>
+            <button onClick={() => onNavigateSection('workspace')} className="hover:text-cyan-400 transition-colors" aria-current={currentPath === '/workspace' ? 'page' : undefined}>My workspace</button>
+          </nav>
 
+          {/* Right Action Buttons (Login & Register) */}
+          <div className="hidden sm:flex items-center gap-3">
             <button
               onClick={() => onOpenAuth('login')}
-              className="text-slate-300 hover:text-white text-xs font-semibold px-2.5 py-1.5 transition-colors"
-            >
-              Login
-            </button>
-
-            <button
-              onClick={() => onOpenAuth('register')}
-              className="relative group overflow-hidden px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-semibold text-xs shadow-lg shadow-cyan-500/20 hover:shadow-cyan-500/40 hover:scale-[1.02] active:scale-95 transition-all"
-            >
-              <span className="relative z-10 flex items-center gap-1.5">
-                <Icon name="UserPlus" className="w-3.5 h-3.5" />
-                <span>Register</span>
-              </span>
-            </button>
-          </div>
-
-          {/* Mobile Menu & Search Icon */}
-          <div className="flex items-center gap-2 md:hidden">
-            <button
-              onClick={onOpenSearch}
-              className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-cyan-400"
-            >
-              <Icon name="Search" className="w-4 h-4" />
-            </button>
-            <button
-              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-              className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 hover:text-white"
-            >
-              <Icon name={mobileMenuOpen ? "X" : "Menu"} className="w-5 h-5" />
-            </button>
-          </div>
-
-        </div>
-      </div>
-
-      {/* Mobile Menu Dropdown */}
-      {mobileMenuOpen && (
-        <div className="md:hidden bg-[#0a0f1d] border-b border-slate-800 px-4 pt-3 pb-6 space-y-3 mt-3 animate-in slide-in-from-top-4 duration-200">
-          <div className="grid grid-cols-2 gap-2">
-            {navItems.map((item) => (
-              <a
-                key={item.label}
-                href={item.href}
-                onClick={(e) => {
-                  e.preventDefault();
-                  setMobileMenuOpen(false);
-                  onNavigateSection(item.href.replace('#', ''));
-                }}
-                className="px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
-              >
-                {item.label}
-              </a>
-            ))}
-          </div>
-          <div className="pt-3 border-t border-slate-800 flex gap-2">
-            <button
-              onClick={() => { setMobileMenuOpen(false); onOpenAuth('login'); }}
-              className="flex-1 py-2 rounded-lg bg-slate-800 text-slate-200 text-xs font-semibold text-center"
+              className="px-4 py-2 text-sm font-semibold text-slate-200 hover:text-white hover:bg-slate-800/60 border border-slate-700/80 rounded-xl transition-all cursor-pointer"
+              id="nav-btn-login"
+              aria-current={currentPath === '/login' ? 'page' : undefined}
             >
               Login
             </button>
             <button
-              onClick={() => { setMobileMenuOpen(false); onOpenAuth('register'); }}
-              className="flex-1 py-2 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-white text-xs font-semibold text-center"
+              onClick={() => onOpenAuth('role-select')}
+              className="px-4 py-2 text-sm font-semibold text-white bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 rounded-xl shadow-md shadow-cyan-500/20 hover:shadow-cyan-500/40 hover:scale-[1.02] transition-all cursor-pointer"
+              id="nav-btn-register"
+              aria-current={currentPath === '/signup' ? 'page' : undefined}
             >
               Register
             </button>
           </div>
+
+          {/* Mobile Menu Toggle */}
+          <div className="flex xl:hidden items-center gap-2">
+            <button
+              onClick={() => onOpenAuth('login')}
+                className="sm:hidden px-3 py-1.5 text-xs font-semibold text-slate-200 border border-slate-700 rounded-lg"
+            >
+              Login
+            </button>
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 text-slate-400 hover:text-white rounded-lg bg-slate-800/60 border border-slate-700/60"
+              id="mobile-menu-toggle" aria-label="Toggle navigation" aria-expanded={mobileMenuOpen}
+            >
+              <Icon name={mobileMenuOpen ? "x" : "menu"} className="w-5 h-5" />
+            </button>
+          </div>
+
         </div>
-      )}
-    </nav>
+
+        {/* Mobile Dropdown Menu */}
+        {mobileMenuOpen && (
+          <div className="xl:hidden mt-3 pt-3 border-t border-slate-800 space-y-2 animate-fade-in-scale">
+            <button onClick={() => { onNavigateSection('hero'); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 rounded-lg">Home</button>
+            <button onClick={() => { onNavigateSection('competitions'); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 rounded-lg">Competitions</button>
+            <button onClick={() => { onNavigateSection('participant'); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 rounded-lg">Participants</button>
+            <button onClick={() => { onNavigateSection('workspace'); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-cyan-300 rounded-lg">My workspace</button>
+            <div className="grid grid-cols-2 gap-2 pb-2">
+              <button
+                onClick={() => { onOpenAuth('login'); setMobileMenuOpen(false); }}
+                className="w-full py-2.5 text-center text-xs font-bold rounded-lg bg-slate-800 text-white border border-slate-700"
+              >
+                Login
+              </button>
+              <button
+                onClick={() => { onOpenAuth('role-select'); setMobileMenuOpen(false); }}
+                className="w-full py-2.5 text-center text-xs font-bold rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md"
+              >
+                Register
+              </button>
+            </div>
+            <button
+              onClick={() => { onOpenSubmit(); setMobileMenuOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/60 rounded-lg flex items-center gap-2"
+            >
+              <Icon name="rocket" className="w-4 h-4 text-cyan-400" />
+              Submit Competition
+            </button>
+            <button
+              onClick={() => { onNavigateSection('jobfairs'); setMobileMenuOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/60 rounded-lg flex items-center gap-2"
+            >
+              <Icon name="briefcase" className="w-4 h-4 text-purple-400" />
+              Job Fair
+            </button>
+            <button
+              onClick={() => { onNavigateSection('rankings'); setMobileMenuOpen(false); }}
+              className="w-full text-left px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/60 rounded-lg flex items-center gap-2"
+            >
+              <Icon name="trendingup" className="w-4 h-4 text-emerald-400" />
+              Rankings
+            </button>
+          </div>
+        )}
+      </div>
+    </header>
   );
 };
 
-// Hero Section Component
-const Hero = ({ onExplore, onSubmitContest, onSelectContest }) => {
-  const [copiedCode, setCopiedCode] = useState(false);
-  const [activeTab, setActiveTab] = useState('code');
-
-  const copySnippet = () => {
-    navigator.clipboard.writeText(window.CODEBD_DATA.codeSnippet);
-    setCopiedCode(true);
-    setTimeout(() => setCopiedCode(false), 2000);
-  };
-
+// ==========================================
+// 5. HERO SECTION WITH 6 PRIMARY ACTION BUTTONS
+// ==========================================
+const HeroSection = ({ onOpenAuth, onOpenSubmit, onNavigateSection }) => {
   return (
-    <section id="hero" className="relative pt-32 pb-20 md:pt-40 md:pb-28 overflow-hidden">
-      <div className="absolute inset-0 bg-grid-pattern opacity-40 pointer-events-none"></div>
-      <div className="absolute top-1/4 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[650px] h-[650px] bg-gradient-to-tr from-cyan-600/15 via-blue-600/20 to-purple-600/15 rounded-full blur-3xl pointer-events-none"></div>
-      <div className="absolute top-20 right-10 w-72 h-72 bg-emerald-600/10 rounded-full blur-3xl pointer-events-none"></div>
+    <section id="hero" className="relative pt-32 pb-16 md:pt-40 md:pb-24 overflow-hidden bg-radial-gradient">
+      
+      {/* Background ambient glowing circles */}
+      <div className="absolute top-20 left-1/2 -translate-x-1/2 w-[700px] h-[350px] bg-cyan-500/10 blur-[130px] rounded-full pointer-events-none"></div>
+      <div className="absolute top-48 right-10 w-[400px] h-[250px] bg-purple-500/10 blur-[100px] rounded-full pointer-events-none"></div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 lg:gap-8 items-center">
-          
-          {/* Left Column: Headline & Action */}
-          <div className="lg:col-span-7 space-y-6 text-center lg:text-left">
-            
-            {/* Bangladesh Flag / Badge */}
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bd-accent-pill backdrop-blur-md text-emerald-300 text-xs sm:text-sm font-semibold shadow-inner animate-pulse-glow">
-              <span className="text-base">🇧🇩</span>
-              <span>Bangladesh's Competitive Programming Hub</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-            </div>
-
-            {/* Main Headline */}
-            <h1 className="font-heading font-black text-4xl sm:text-5xl lg:text-6xl text-white tracking-tight leading-[1.1]">
-              Every Coding Competition.{" "}
-              <span className="gradient-text-hero block sm:inline">
-                One Place.
-              </span>
-            </h1>
-
-            {/* Supporting Text */}
-            <p className="text-base sm:text-lg text-slate-300 max-w-2xl mx-auto lg:mx-0 leading-relaxed font-normal">
-              Discover programming contests, hackathons, ICPC events, university competitions, and CSE challenges happening across Bangladesh.
-            </p>
-
-            {/* Action Buttons */}
-            <div className="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2">
-              <button
-                onClick={onExplore}
-                className="px-7 py-3.5 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-bold text-sm sm:text-base shadow-xl shadow-cyan-500/25 hover:shadow-cyan-500/40 hover:scale-[1.02] active:scale-95 transition-all flex items-center gap-2 group cursor-pointer"
-              >
-                <span>Explore Competitions</span>
-                <Icon name="ArrowRight" className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
-              </button>
-
-              <button
-                onClick={onSubmitContest}
-                className="px-6 py-3.5 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-200 hover:text-white border border-slate-700/80 hover:border-slate-500 font-semibold text-sm sm:text-base transition-all flex items-center gap-2 group shadow-lg cursor-pointer"
-              >
-                <Icon name="PlusCircle" className="w-4 h-4 text-cyan-400 group-hover:rotate-90 transition-transform" />
-                <span>Submit a Competition</span>
-              </button>
-            </div>
-
-            {/* Quick Trending Tags */}
-            <div className="pt-4 flex flex-wrap items-center justify-center lg:justify-start gap-2 text-xs text-slate-400">
-              <span className="font-semibold text-slate-500 uppercase tracking-wider text-[11px] mr-1">Trending:</span>
-              {["#BUET_IUPC", "#ICPC_Dhaka_Regional", "#DU_Hackathon", "#SUST_Battle", "#KUET_CP"].map((tag, i) => (
-                <span
-                  key={i}
-                  onClick={onExplore}
-                  className="px-2.5 py-1 rounded-md bg-slate-900/80 border border-slate-800 text-slate-300 hover:text-cyan-300 hover:border-cyan-500/40 cursor-pointer transition-all"
-                >
-                  {tag}
-                </span>
-              ))}
-            </div>
-
-          </div>
-
-          {/* Right Column: Interactive Tech CP Dashboard */}
-          <div className="lg:col-span-5 relative">
-            
-            <div className="relative rounded-2xl p-1 bg-gradient-to-b from-cyan-500/30 via-slate-800/50 to-indigo-500/30 shadow-2xl glow-box-blue">
-              <div className="bg-[#0b101d] rounded-[15px] p-5 border border-slate-800/80 backdrop-blur-xl relative overflow-hidden">
-                
-                {/* Header Bar */}
-                <div className="flex items-center justify-between pb-4 border-b border-slate-800/80">
-                  <div className="flex items-center gap-2">
-                    <div className="w-3 h-3 rounded-full bg-red-500/80"></div>
-                    <div className="w-3 h-3 rounded-full bg-amber-500/80"></div>
-                    <div className="w-3 h-3 rounded-full bg-emerald-500/80"></div>
-                    <span className="ml-2 font-mono-code text-xs text-slate-400 flex items-center gap-1.5">
-                      <Icon name="Terminal" className="w-3.5 h-3.5 text-cyan-400" />
-                      icpc_dhaka_arena.cpp
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1 bg-slate-900/80 p-1 rounded-lg border border-slate-800 text-xs">
-                    <button
-                      onClick={() => setActiveTab('code')}
-                      className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition-all ${
-                        activeTab === 'code' ? 'bg-cyan-500 text-black font-bold' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      IDE
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('leaderboard')}
-                      className={`px-2.5 py-0.5 rounded text-[11px] font-semibold transition-all ${
-                        activeTab === 'leaderboard' ? 'bg-cyan-500 text-black font-bold' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      Live Rank
-                    </button>
-                  </div>
-                </div>
-
-                {/* Upcoming Next Major Contest Countdown Banner */}
-                <div className="my-4 p-3 rounded-xl bg-gradient-to-r from-blue-950/60 via-slate-900 to-indigo-950/60 border border-blue-500/30 flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-400/30 flex items-center justify-center text-blue-400">
-                      <Icon name="Trophy" className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                        <span>BUET IUPC 2026</span>
-                        <span className="px-1.5 py-0.2 bg-emerald-500/20 text-emerald-400 text-[10px] rounded border border-emerald-500/30">Open</span>
-                      </div>
-                      <div className="text-[11px] text-slate-400">Dhaka • Preliminary Round</div>
-                    </div>
-                  </div>
-                  <CountdownTimer targetDate="2026-09-20T09:00:00" initialDays={16} />
-                </div>
-
-                {/* Main Content: IDE or Leaderboard */}
-                {activeTab === 'code' ? (
-                  <div className="relative">
-                    <div className="flex justify-between items-center mb-2">
-                      <span className="text-[11px] font-mono-code text-cyan-400 flex items-center gap-1">
-                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-                        Fast I/O BD CP Template
-                      </span>
-                      <button
-                        onClick={copySnippet}
-                        className="text-[10px] font-mono-code flex items-center gap-1 text-slate-400 hover:text-cyan-300 bg-slate-900 px-2 py-1 rounded border border-slate-800 transition-colors cursor-pointer"
-                      >
-                        <Icon name={copiedCode ? "Check" : "Copy"} className="w-3 h-3 text-cyan-400" />
-                        {copiedCode ? "Copied!" : "Copy Code"}
-                      </button>
-                    </div>
-
-                    <pre className="bg-[#060911] p-3.5 rounded-xl border border-slate-800/90 text-xs font-mono-code text-slate-300 overflow-x-auto leading-relaxed shadow-inner">
-                      <code>{`// BUET / ICPC Dhaka Warmup
-#include <bits/stdc++.h>
-using namespace std;
-
-void solve() {
-    int n; cin >> n;
-    // Fast BD Contest Logic
-    cout << "AC: 🇧🇩 Rank #1\\n";
-}
-
-int main() {
-    ios_base::sync_with_stdio(0);
-    solve();
-}`}</code>
-                    </pre>
-
-                    <div className="mt-3 flex items-center justify-between text-[11px] text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <Icon name="CheckCircle2" className="w-3.5 h-3.5 text-emerald-400" />
-                        Compiler: GCC 14.2 (C++20)
-                      </span>
-                      <span className="text-emerald-400 font-mono-code font-bold">Passed 14/14 Tests (0.012s)</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="text-xs font-semibold text-slate-300 mb-2 flex items-center justify-between">
-                      <span>National Collegiate Standings</span>
-                      <span className="text-[10px] text-cyan-400 font-mono-code">Live Sync</span>
-                    </div>
-                    {window.CODEBD_DATA.leaderboardSnippet.map((item) => (
-                      <div
-                        key={item.rank}
-                        className="flex items-center justify-between p-2 rounded-lg bg-slate-900/80 border border-slate-800/90 text-xs"
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold text-[10px] ${
-                            item.rank === 1 ? 'bg-amber-400/20 text-amber-300 border border-amber-400/40' :
-                            item.rank === 2 ? 'bg-slate-400/20 text-slate-300 border border-slate-400/40' :
-                            'bg-amber-700/20 text-amber-500 border border-amber-700/40'
-                          }`}>
-                            {item.rank}
-                          </span>
-                          <div>
-                            <div className="font-bold text-white text-xs">{item.team}</div>
-                            <div className="text-[10px] text-slate-400">{item.uni}</div>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-cyan-400 font-mono-code font-bold">{item.solved}</div>
-                          <div className="text-[10px] text-slate-500">{item.penalty}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Bangladesh Tech Ecosystem Map Nodes */}
-                <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                    <span>Hubs: <strong>Dhaka • Sylhet • Khulna • Rajshahi • CTG</strong></span>
-                  </div>
-                  <span className="font-mono-code text-cyan-400">45+ Universities</span>
-                </div>
-
-              </div>
-            </div>
-
-            {/* Floating UI Badges */}
-            <div className="absolute -top-4 -right-4 bg-slate-900/95 border border-cyan-500/40 rounded-xl p-3 shadow-xl backdrop-blur-md hidden sm:flex items-center gap-2 animate-float">
-              <div className="w-8 h-8 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-400">
-                <Icon name="CheckCircle" className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-[11px] font-bold text-white">Accepted (AC)</div>
-                <div className="text-[10px] text-emerald-400 font-mono-code">100% Correct Solution</div>
-              </div>
-            </div>
-
-            <div className="absolute -bottom-5 -left-5 bg-slate-900/95 border border-purple-500/40 rounded-xl p-3 shadow-xl backdrop-blur-md hidden sm:flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-purple-500/20 border border-purple-500/40 flex items-center justify-center text-purple-400">
-                <Icon name="Coins" className="w-4 h-4" />
-              </div>
-              <div>
-                <div className="text-[11px] font-bold text-white">৳2,00,000 Total Prizes</div>
-                <div className="text-[10px] text-slate-400">Autumn 2026 Season</div>
-              </div>
-            </div>
-
-          </div>
-
-        </div>
-      </div>
-    </section>
-  );
-};
-
-// Quick Statistics Component
-const QuickStatistics = () => {
-  return (
-    <section className="relative -mt-6 z-20 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-      <div className="glass-panel rounded-2xl p-6 sm:p-8 shadow-2xl border border-slate-800/90">
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 divide-y sm:divide-y-0 sm:divide-x divide-slate-800/80">
-          {window.CODEBD_DATA.stats.map((stat, index) => (
-            <div key={index} className={`flex flex-col items-center text-center group ${index !== 0 ? 'sm:pl-6 pt-4 sm:pt-0' : ''}`}>
-              <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-500/10 to-blue-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-400 mb-3 group-hover:scale-110 group-hover:border-cyan-400/50 transition-all shadow-inner">
-                <Icon name={stat.icon} className="w-6 h-6" />
-              </div>
-              <div className="font-heading font-black text-3xl sm:text-4xl text-white tracking-tight group-hover:text-cyan-300 transition-colors">
-                {stat.value}
-              </div>
-              <div className="text-xs sm:text-sm font-bold text-slate-200 mt-1">
-                {stat.label}
-              </div>
-              <div className="text-[11px] text-slate-400 font-medium mt-0.5">
-                {stat.change}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-};
-
-// Upcoming Competitions Section
-const UpcomingCompetitions = ({ onSelectContest, onBookmarkToggle, bookmarks }) => {
-  const [activeCategory, setActiveCategory] = useState('all');
-  const [searchTerm, setSearchTerm] = useState('');
-
-  const competitions = window.CODEBD_DATA.upcomingCompetitions;
-
-  const filteredCompetitions = useMemo(() => {
-    return competitions.filter(item => {
-      const matchSearch = item.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.university.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.location.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          item.type.toLowerCase().includes(searchTerm.toLowerCase());
-      if (activeCategory === 'all') return matchSearch;
-      if (activeCategory === 'icpc') return matchSearch && (item.category === 'ICPC' || item.tags.includes('ICPC Style'));
-      if (activeCategory === 'hackathon') return matchSearch && item.type.toLowerCase().includes('hackathon');
-      if (activeCategory === 'cp') return matchSearch && (item.type.toLowerCase().includes('programming') || item.type.toLowerCase().includes('competitive'));
-      return matchSearch;
-    });
-  }, [competitions, activeCategory, searchTerm]);
-
-  return (
-    <section id="competitions" className="py-20 relative">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        {/* Section Header */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-10 gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 text-xs font-semibold uppercase tracking-wider mb-2">
-              <Icon name="Calendar" className="w-3.5 h-3.5" />
-              <span>National Contest Calendar</span>
-            </div>
-            <h2 className="font-heading font-black text-3xl sm:text-4xl text-white tracking-tight">
-              Upcoming Competitions
-            </h2>
-            <p className="text-slate-400 text-sm sm:text-base mt-1">
-              Don't miss your next challenge. Register before deadlines close.
-            </p>
-          </div>
-
-          {/* Quick Filter Tabs & Search */}
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <input
-                type="text"
-                placeholder="Filter by university, title..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="bg-slate-900/90 border border-slate-800 rounded-xl px-3.5 py-2 pl-9 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-48 sm:w-64 transition-all"
-              />
-              <Icon name="Search" className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
-              {searchTerm && (
-                <button onClick={() => setSearchTerm('')} className="absolute right-2.5 top-2.5 text-slate-500 hover:text-white text-xs">
-                  ✕
-                </button>
-              )}
-            </div>
-
-            <div className="flex bg-slate-900/90 p-1 rounded-xl border border-slate-800 text-xs">
-              {[
-                { id: 'all', label: 'All Contests' },
-                { id: 'icpc', label: 'ICPC / IUPC' },
-                { id: 'hackathon', label: 'Hackathons' },
-                { id: 'cp', label: 'Speed CP' }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setActiveCategory(tab.id)}
-                  className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                    activeCategory === tab.id
-                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold shadow-sm'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
+        {/* Top Tagline Pill */}
+        <div className="flex justify-center mb-6">
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-900/90 border border-cyan-500/30 text-xs font-semibold text-cyan-300 shadow-lg shadow-cyan-500/10">
+            <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping"></span>
+            <span>Talent, Competitions & Job Fair Platform</span>
+            <span className="text-slate-500">&middot;</span>
+            <span className="text-slate-300">Frontend Preview</span>
           </div>
         </div>
 
-        {/* Competition Cards Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {filteredCompetitions.map((contest) => {
-            const isBookmarked = bookmarks && bookmarks.includes(contest.id);
-            const isClosingSoon = contest.status === "Closing Soon";
-
-            return (
-              <div
-                key={contest.id}
-                className="glass-card rounded-2xl p-6 relative group overflow-hidden flex flex-col justify-between"
-              >
-                <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${
-                  contest.university === 'BUET' ? 'from-red-500 via-amber-500 to-blue-500' :
-                  contest.university === 'KUET' ? 'from-teal-400 to-cyan-500' :
-                  contest.university === 'DU' ? 'from-blue-500 to-indigo-600' :
-                  'from-purple-500 to-pink-500'
-                }`}></div>
-
-                <div>
-                  <div className="flex items-start justify-between gap-3 mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-heading font-black text-base shadow-lg ${
-                        contest.university === 'BUET' ? 'bg-red-950/80 text-red-300 border border-red-500/40' :
-                        contest.university === 'KUET' ? 'bg-teal-950/80 text-teal-300 border border-teal-500/40' :
-                        contest.university === 'DU' ? 'bg-blue-950/80 text-blue-300 border border-blue-500/40' :
-                        'bg-purple-950/80 text-purple-300 border border-purple-500/40'
-                      }`}>
-                        {contest.university}
-                      </div>
-
-                      <div>
-                        <div className="text-xs font-semibold text-slate-400 flex items-center gap-1.5">
-                          <span>{contest.organizer}</span>
-                        </div>
-                        <span className="text-[11px] font-mono-code text-cyan-400 font-medium">
-                          {contest.type}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5 ${
-                        isClosingSoon
-                          ? 'bg-amber-950/80 text-amber-300 border-amber-500/40 shadow-amber-500/20 shadow-sm'
-                          : 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40 shadow-emerald-500/20 shadow-sm'
-                      }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${isClosingSoon ? 'bg-amber-400 animate-ping' : 'bg-emerald-400 animate-ping'}`}></span>
-                        {contest.status}
-                      </span>
-
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onBookmarkToggle(contest.id);
-                        }}
-                        className={`p-2 rounded-lg border transition-all cursor-pointer ${
-                          isBookmarked 
-                            ? 'bg-cyan-500/20 border-cyan-500/50 text-cyan-400' 
-                            : 'bg-slate-900/80 border-slate-800 text-slate-400 hover:text-white hover:border-slate-700'
-                        }`}
-                        title={isBookmarked ? "Remove Bookmark" : "Save Competition"}
-                      >
-                        <Icon name="Bookmark" className={`w-4 h-4 ${isBookmarked ? 'fill-cyan-400' : ''}`} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <h3
-                    onClick={() => onSelectContest(contest)}
-                    className="font-heading font-extrabold text-xl text-white group-hover:text-cyan-300 transition-colors cursor-pointer mb-2 leading-snug"
-                  >
-                    {contest.title}
-                  </h3>
-
-                  <p className="text-slate-400 text-xs line-clamp-2 mb-4 leading-relaxed">
-                    {contest.description}
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs mb-4">
-                    <div className="flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
-                      <Icon name="Calendar" className="w-4 h-4 text-cyan-400 shrink-0" />
-                      <div className="truncate">
-                        <span className="text-[10px] text-slate-500 block">Date</span>
-                        <span className="font-semibold text-slate-200">{contest.date}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
-                      <Icon name="MapPin" className="w-4 h-4 text-emerald-400 shrink-0" />
-                      <div className="truncate">
-                        <span className="text-[10px] text-slate-500 block">Location</span>
-                        <span className="font-semibold text-slate-200">{contest.location}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
-                      <Icon name="Trophy" className="w-4 h-4 text-amber-400 shrink-0" />
-                      <div className="truncate">
-                        <span className="text-[10px] text-slate-500 block">Prize Pool</span>
-                        <span className="font-semibold text-amber-300 font-mono-code">{contest.prizePool}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 bg-slate-900/60 p-2.5 rounded-xl border border-slate-800/80">
-                      <Icon name="Users" className="w-4 h-4 text-indigo-400 shrink-0" />
-                      <div className="truncate">
-                        <span className="text-[10px] text-slate-500 block">Team Format</span>
-                        <span className="font-semibold text-slate-200">{contest.teamSize}</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap gap-1.5 mb-5">
-                    {contest.tags.map((t, idx) => (
-                      <span
-                        key={idx}
-                        className="px-2 py-0.5 rounded bg-slate-900 text-[11px] font-mono-code text-slate-300 border border-slate-800"
-                      >
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t border-slate-800/80 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-slate-400 flex items-center gap-1">
-                      <Icon name="Clock" className="w-3.5 h-3.5 text-cyan-400" />
-                      Countdown:
-                    </span>
-                    <CountdownTimer targetDate={contest.targetDate} initialDays={contest.daysLeft} />
-                  </div>
-
-                  <button
-                    onClick={() => onSelectContest(contest)}
-                    className="w-full sm:w-auto px-4 py-2 rounded-xl bg-cyan-500/10 hover:bg-cyan-500 text-cyan-300 hover:text-black border border-cyan-500/30 hover:border-cyan-400 text-xs font-bold transition-all flex items-center justify-center gap-1.5 group/btn cursor-pointer"
-                  >
-                    <span>View Details</span>
-                    <Icon name="ArrowRight" className="w-3.5 h-3.5 group-hover/btn:translate-x-1 transition-transform" />
-                  </button>
-                </div>
-
-              </div>
-            );
-          })}
-        </div>
-
-      </div>
-    </section>
-  );
-};
-
-// Browse By Category Component
-const BrowseByCategory = ({ onSelectCategory }) => {
-  const categories = window.CODEBD_DATA.categories;
-
-  return (
-    <section id="categories" className="py-20 relative bg-gradient-to-b from-transparent via-slate-950/60 to-transparent">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
-        <div className="text-center max-w-3xl mx-auto mb-14">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-400 text-xs font-semibold uppercase tracking-wider mb-3">
-            <Icon name="LayoutGrid" className="w-3.5 h-3.5" />
-            <span>Discover Domains</span>
-          </div>
-          <h2 className="font-heading font-black text-3xl sm:text-4xl text-white tracking-tight">
-            What Are You Looking For?
-          </h2>
-          <p className="text-slate-400 text-sm sm:text-base mt-2">
-            Explore diverse arenas from algorithmic battles to product hackathons and cybersecurity CTFs.
+        {/* Hero Title & Subheading */}
+        <div className="text-center max-w-4xl mx-auto space-y-5">
+          <h1 className="font-heading font-black text-4xl sm:text-5xl lg:text-6xl tracking-tight text-white leading-[1.15]">
+            Where Champions Compete,{' '}
+            <span className="gradient-text-hero">Talents Shine</span> &amp; Companies Hire.
+          </h1>
+          <p className="text-base sm:text-lg text-slate-300 max-w-2xl mx-auto leading-relaxed">
+            The premier unified hub for discovering engineering hackathons, submitting contests, accelerating careers in virtual job fairs, and climbing verified global rankings.
           </p>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {categories.map((cat) => (
-            <div
-              key={cat.id}
-              onClick={() => onSelectCategory(cat)}
-              className="glass-card rounded-2xl p-5 cursor-pointer relative group overflow-hidden transition-all duration-300"
-            >
-              <div className={`absolute -right-8 -top-8 w-24 h-24 bg-gradient-to-br ${cat.gradient} rounded-full blur-2xl group-hover:scale-150 transition-transform`}></div>
+        {/* ========================================================= */}
+        {/* THE SIX PRIMARY ACTION BUTTONS (MANDATORY REQUIREMENT)   */}
+        {/* ========================================================= */}
+        <div className="mt-12 max-w-5xl mx-auto">
+          <div className="text-center mb-5">
+            <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
+              Select an action to get started immediately
+            </span>
+          </div>
 
-              <div className="flex items-start justify-between mb-4">
-                <div className={`w-12 h-12 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center ${cat.accent} shadow-md group-hover:scale-110 transition-transform`}>
-                  <Icon name={cat.icon} className="w-6 h-6" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4" id="six-primary-actions-grid">
+            
+            {/* 1. Login */}
+            <div
+              onClick={() => onOpenAuth('login')}
+              id="action-btn-login"
+              role="button"
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
+              tabIndex={0}
+              className="action-btn-card group p-5 rounded-2xl glass-card cursor-pointer border border-slate-800 hover:border-cyan-500/50"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 group-hover:scale-110 group-hover:bg-cyan-500 group-hover:text-black transition-all">
+                  <Icon name="user" className="w-6 h-6" />
                 </div>
-                <span className="text-[11px] font-mono-code font-bold px-2 py-0.5 rounded-full bg-slate-900/90 text-slate-300 border border-slate-800 group-hover:border-slate-700">
-                  {cat.count}
+                <span className="px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider bg-slate-800/80 text-cyan-300 rounded-md border border-cyan-500/20">
+                  Action 1
                 </span>
               </div>
-
-              <h3 className="font-heading font-bold text-lg text-white group-hover:text-cyan-300 transition-colors mb-1">
-                {cat.name}
+              <h3 className="font-heading font-bold text-lg text-white mt-4 flex items-center gap-1.5 group-hover:text-cyan-300 transition-colors">
+                Login
+                <Icon name="arrowright" className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all text-cyan-400" />
               </h3>
-              
-              <p className="text-slate-400 text-xs line-clamp-2 leading-relaxed mb-3">
-                {cat.description}
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Access your participant portfolio, organizer events, or recruiter candidate dashboard.
               </p>
+            </div>
 
-              <div className="flex items-center gap-1 text-[11px] font-semibold text-cyan-400 group-hover:translate-x-1 transition-transform">
-                <span>Explore contests</span>
-                <Icon name="ChevronRight" className="w-3.5 h-3.5" />
+            {/* 2. Register */}
+            <div
+              onClick={() => onOpenAuth('role-select')}
+              id="action-btn-register"
+              role="button"
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
+              tabIndex={0}
+              className="action-btn-card group p-5 rounded-2xl glass-card cursor-pointer border border-slate-800 hover:border-blue-500/50 bg-gradient-to-b from-blue-950/20 to-transparent"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-110 group-hover:bg-blue-500 group-hover:text-white transition-all">
+                  <Icon name="sparkles" className="w-6 h-6" />
+                </div>
+                <span className="px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider bg-blue-500/20 text-blue-300 rounded-md border border-blue-500/30">
+                  Action 2
+                </span>
               </div>
+              <h3 className="font-heading font-bold text-lg text-white mt-4 flex items-center gap-1.5 group-hover:text-blue-300 transition-colors">
+                Register
+                <Icon name="arrowright" className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all text-blue-400" />
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Create your account as a Participant, Organizer, or Recruiter with customized onboarding.
+              </p>
+            </div>
+
+            {/* 3. Submit Competition */}
+            <div
+              onClick={onOpenSubmit}
+              id="action-btn-submit-competition"
+              role="button"
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
+              tabIndex={0}
+              className="action-btn-card group p-5 rounded-2xl glass-card cursor-pointer border border-slate-800 hover:border-emerald-500/50"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-black transition-all">
+                  <Icon name="rocket" className="w-6 h-6" />
+                </div>
+                <span className="px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 rounded-md border border-emerald-500/30">
+                  Action 3
+                </span>
+              </div>
+              <h3 className="font-heading font-bold text-lg text-white mt-4 flex items-center gap-1.5 group-hover:text-emerald-300 transition-colors">
+                Submit Competition
+                <Icon name="arrowright" className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all text-emerald-400" />
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Publish your university hackathon, coding contest, or design sprint to thousands of contestants.
+              </p>
+            </div>
+
+            {/* 4. Explore Competitions */}
+            <div
+              onClick={() => onNavigateSection('competitions')}
+              id="action-btn-explore-competitions"
+              role="button"
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
+              tabIndex={0}
+              className="action-btn-card group p-5 rounded-2xl glass-card cursor-pointer border border-slate-800 hover:border-purple-500/50"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center text-purple-400 group-hover:scale-110 group-hover:bg-purple-500 group-hover:text-white transition-all">
+                  <Icon name="trophy" className="w-6 h-6" />
+                </div>
+                <span className="px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 rounded-md border border-purple-500/30">
+                  Action 4
+                </span>
+              </div>
+              <h3 className="font-heading font-bold text-lg text-white mt-4 flex items-center gap-1.5 group-hover:text-purple-300 transition-colors">
+                Explore Competitions
+                <Icon name="arrowright" className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all text-purple-400" />
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Browse active hackathons, algorithms cups, and design challenges filtered by prize pool &amp; tags.
+              </p>
+            </div>
+
+            {/* 5. Job Fair */}
+            <div
+              onClick={() => onNavigateSection('jobfairs')}
+              id="action-btn-job-fair"
+              role="button"
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
+              tabIndex={0}
+              className="action-btn-card group p-5 rounded-2xl glass-card cursor-pointer border border-slate-800 hover:border-pink-500/50"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-xl bg-pink-500/10 border border-pink-500/30 flex items-center justify-center text-pink-400 group-hover:scale-110 group-hover:bg-pink-500 group-hover:text-white transition-all">
+                  <Icon name="briefcase" className="w-6 h-6" />
+                </div>
+                <span className="px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider bg-pink-500/20 text-pink-300 rounded-md border border-pink-500/30">
+                  Action 5
+                </span>
+              </div>
+              <h3 className="font-heading font-bold text-lg text-white mt-4 flex items-center gap-1.5 group-hover:text-pink-300 transition-colors">
+                Job Fair
+                <Icon name="arrowright" className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all text-pink-400" />
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Meet recruiters from Google, Microsoft, Meta &amp; high-growth startups offering fast-track hiring.
+              </p>
+            </div>
+
+            {/* 6. Rankings */}
+            <div
+              onClick={() => onNavigateSection('rankings')}
+              id="action-btn-rankings"
+              role="button"
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.currentTarget.click(); } }}
+              tabIndex={0}
+              className="action-btn-card group p-5 rounded-2xl glass-card cursor-pointer border border-slate-800 hover:border-amber-500/50"
+            >
+              <div className="flex items-start justify-between">
+                <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 group-hover:scale-110 group-hover:bg-amber-500 group-hover:text-black transition-all">
+                  <Icon name="trendingup" className="w-6 h-6" />
+                </div>
+                <span className="px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 rounded-md border border-amber-500/30">
+                  Action 6
+                </span>
+              </div>
+              <h3 className="font-heading font-bold text-lg text-white mt-4 flex items-center gap-1.5 group-hover:text-amber-300 transition-colors">
+                Rankings
+                <Icon name="arrowright" className="w-4 h-4 opacity-0 -translate-x-2 group-hover:opacity-100 group-hover:translate-x-0 transition-all text-amber-400" />
+              </h3>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                Check the global leaderboard, university standings, and talent ratings verified across contests.
+              </p>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Live Platform Stats */}
+        <div className="mt-14 max-w-5xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+          {(window.TALENTSPHERE_DATA?.stats || []).map((stat, i) => (
+            <div key={i} className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-center">
+              <div className="text-xl sm:text-2xl font-heading font-black text-white">{stat.value}</div>
+              <div className="text-xs font-semibold text-slate-300 mt-0.5">{stat.label}</div>
+              <div className="text-[11px] text-cyan-400 mt-1 font-mono-code">{stat.change}</div>
             </div>
           ))}
         </div>
@@ -852,1049 +503,844 @@ const BrowseByCategory = ({ onSelectCategory }) => {
   );
 };
 
-// Featured Competition Section
-const FeaturedCompetition = ({ onRegister, onSelectContest }) => {
-  const featured = window.CODEBD_DATA.featuredCompetition;
+// =========================================================================
+// 6. DYNAMIC AUTHENTICATION MODAL (LOGIN, ROLE-SELECTION, 3 REGISTRATIONS)
+// =========================================================================
+const ExploreCompetitionsSection = ({ onSelectContest }) => {
+  const [activeCategory, setActiveCategory] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const categories = window.TALENTSPHERE_DATA?.categories || [];
+  const [allCompetitions, setAllCompetitions] = useState([]);
+  const [loadState, setLoadState] = useState('loading');
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const params = new URLSearchParams({ page_size: '3', ordering: 'recent' });
+    if (activeCategory !== 'all') params.set('category', activeCategory);
+    if (searchQuery.trim()) params.set('search', searchQuery.trim());
+    getCompetitionPage(params, controller.signal).then(result => {
+      setAllCompetitions((result.results || []).map(mapCompetitionRecord));
+      setLoadState('ready');
+    }).catch(error => {
+      if (error.name !== 'AbortError') setLoadState('error');
+    });
+    return () => controller.abort();
+  }, [activeCategory, searchQuery]);
+
+  const filteredCompetitions = useMemo(() => {
+    return allCompetitions.filter(comp => {
+      const matchCat = activeCategory === 'all' || comp.category === activeCategory;
+      const q = searchQuery.toLowerCase().trim();
+      const matchQuery = !q || [comp.title, comp.organizer, comp.university, comp.hostOrganization, comp.type,
+        ...(Array.isArray(comp.tags) ? comp.tags : [])].filter(Boolean).join(' ').toLowerCase().includes(q);
+      return matchCat && matchQuery;
+    });
+  }, [activeCategory, searchQuery, allCompetitions]);
 
   return (
-    <section className="py-16 relative">
+    <section id="competitions" className="py-20 bg-[#070a13] relative border-t border-slate-800/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        <div className="relative rounded-3xl p-1 bg-gradient-to-r from-amber-500/40 via-cyan-500/40 to-purple-600/40 shadow-2xl glow-box-purple shimmer-border">
-          <div className="bg-[#080d19] rounded-[22px] p-6 sm:p-10 border border-slate-800/80 relative overflow-hidden">
-            
-            <div className="absolute top-0 right-0 w-96 h-96 bg-amber-500/10 rounded-full blur-3xl pointer-events-none"></div>
-            <div className="absolute bottom-0 left-10 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center relative z-10">
-              
-              <div className="lg:col-span-7 space-y-5">
-                <div className="flex flex-wrap items-center gap-2.5">
-                  <span className="px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-extrabold tracking-wide uppercase flex items-center gap-1.5 shadow-sm">
-                    <Icon name="Flame" className="w-3.5 h-3.5 text-amber-400" />
-                    {featured.statusBadge}
-                  </span>
-                  <span className="px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300 text-xs font-semibold">
-                    {featured.format}
-                  </span>
-                </div>
-
-                <h2 className="font-heading font-black text-3xl sm:text-4xl lg:text-5xl text-white tracking-tight leading-tight">
-                  {featured.title}
-                </h2>
-
-                <p className="text-slate-300 text-sm sm:text-base leading-relaxed">
-                  {featured.description}
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                  {featured.highlights.map((h, i) => (
-                    <div key={i} className="flex items-center gap-2 text-xs font-medium text-slate-200">
-                      <div className="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
-                        ✓
-                      </div>
-                      <span>{h}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="pt-2 flex flex-wrap items-center gap-4">
-                  <div className="bg-slate-900/90 border border-amber-500/30 rounded-xl p-3 px-4 flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-amber-500/20 flex items-center justify-center text-amber-400">
-                      <Icon name="Coins" className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400 uppercase font-semibold">Prize Pool</div>
-                      <div className="font-heading font-black text-xl text-amber-300 font-mono-code">{featured.prizePool}</div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900/90 border border-cyan-500/30 rounded-xl p-3 px-4 flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400">
-                      <Icon name="Users" className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400 uppercase font-semibold">Expected Teams</div>
-                      <div className="font-heading font-black text-xl text-cyan-300">{featured.participants}</div>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-900/90 border border-purple-500/30 rounded-xl p-3 px-4 flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400">
-                      <Icon name="UserCheck" className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-slate-400 uppercase font-semibold">Team Size</div>
-                      <div className="font-heading font-black text-lg text-purple-300">{featured.teamSize}</div>
-                    </div>
-                  </div>
-                </div>
-
-              </div>
-
-              <div className="lg:col-span-5 bg-[#0d1424] rounded-2xl p-6 border border-slate-700/80 shadow-2xl space-y-6">
-                <div className="text-center space-y-1">
-                  <span className="text-xs font-mono-code text-cyan-400 uppercase tracking-wider font-bold">
-                    Official Contest Countdown
-                  </span>
-                  <h4 className="text-white font-heading font-bold text-lg">
-                    Registration Deadline Approaching
-                  </h4>
-                </div>
-
-                <div className="p-4 rounded-xl bg-[#060911] border border-cyan-500/30 shadow-inner flex justify-center">
-                  <CountdownTimer targetDate={featured.targetDate} initialDays={45} />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="text-[11px] font-semibold text-slate-400 uppercase">Key Milestones</div>
-                  {featured.schedule.map((item, idx) => (
-                    <div key={idx} className="flex items-center justify-between text-xs py-1.5 px-3 rounded-lg bg-slate-900/80 border border-slate-800">
-                      <span className="font-bold text-slate-300">{item.event}</span>
-                      <span className="font-mono-code text-cyan-400 font-semibold">{item.date}</span>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="space-y-2 pt-2">
-                  <button
-                    onClick={() => onRegister(featured)}
-                    className="w-full py-3.5 rounded-xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-600 text-white font-extrabold text-sm shadow-xl shadow-amber-500/25 hover:shadow-amber-500/40 hover:scale-[1.01] active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Icon name="Zap" className="w-4 h-4" />
-                    <span>Register for National Championship</span>
-                  </button>
-
-                  <button
-                    onClick={() => onSelectContest(featured)}
-                    className="w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs font-semibold transition-all text-center cursor-pointer"
-                  >
-                    View Official Rulebook & Syllabus
-                  </button>
-                </div>
-
-              </div>
-
+        {/* Section Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-10">
+          <div>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-xs font-semibold text-cyan-400 mb-2">
+              <Icon name="trophy" className="w-3.5 h-3.5" />
+              <span>Published CSE Competitions</span>
             </div>
+            <h2 className="font-heading font-black text-3xl sm:text-4xl text-white">
+              Explore CSE Competitions
+            </h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Browse administrator-approved programming, AI, hackathon, and other CSE challenges.
+            </p>
+          </div>
 
+          {/* Search bar */}
+          <div className="w-full md:w-80 relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+              <Icon name="search" className="w-4 h-4" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search hackathons, algorithms, tags..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="form-input pl-9 text-xs"
+              id="competition-search-input"
+              aria-label="Search competitions"
+            />
+            {searchQuery && (
+              <button 
+                onClick={() => setSearchQuery('')}
+                aria-label="Clear competition search"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs"
+              >
+                ✕
+              </button>
+            )}
           </div>
         </div>
 
+        {/* Category Pills */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-8 scrollbar-none">
+          {categories.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => setActiveCategory(cat.id)}
+              aria-pressed={activeCategory === cat.id}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+                activeCategory === cat.id
+                  ? 'bg-cyan-500 text-black shadow-lg shadow-cyan-500/20 font-bold'
+                  : 'bg-slate-900/80 text-slate-300 border border-slate-800 hover:border-slate-700 hover:text-white'
+              }`}
+            >
+              <Icon name={cat.icon || 'trophy'} className="w-3.5 h-3.5" />
+              <span>{cat.name}</span>
+            </button>
+          ))}
+        </div>
+
+        {/* Competitions Grid */}
+        {loadState === 'loading' ? <div className="text-center py-12" role="status">Loading published competitions…</div> :
+        loadState === 'error' ? <div className="text-center py-12" role="alert">Published competitions could not be loaded. Please try again later.</div> :
+        filteredCompetitions.length === 0 ? (
+          <div className="text-center py-16 p-8 rounded-2xl glass-card border border-slate-800">
+            <Icon name="trophy" className="w-12 h-12 text-slate-600 mx-auto mb-3" />
+            <h3 className="font-heading font-bold text-lg text-white">No published competitions yet</h3>
+            <p className="text-xs text-slate-400 mt-1">Approved competitions will appear here after administrator review.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {filteredCompetitions.map(comp => (
+              <div
+                key={comp.id}
+                className="glass-card rounded-2xl p-6 border border-slate-800/80 flex flex-col justify-between hover:border-cyan-500/40 transition-all group"
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <span className="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
+                      {comp.type}
+                    </span>
+                    <span className="px-2 py-0.5 text-[10px] font-semibold rounded-md bg-blue-500/15 text-blue-300 border border-blue-500/20 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-300"></span>
+                      Django published
+                    </span>
+                  </div>
+
+                  <h3 className="font-heading font-bold text-lg text-white group-hover:text-cyan-300 transition-colors line-clamp-2">
+                    {comp.title}
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 font-medium">
+                    By {comp.organizer}
+                  </p>
+
+                  <div className="space-y-2 mt-4 pt-3 border-t border-slate-800/80 text-xs text-slate-300">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Prize Pool:</span>
+                      <span className="font-bold text-emerald-400 font-mono-code">{comp.prizePool || 'Not provided'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Format:</span>
+                    <span className="text-slate-300">{comp.mode || 'Mode not provided'} &middot; {comp.location || 'Location not provided'}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Team Size:</span>
+                    <span className="text-slate-300">{comp.teamSize || 'Not provided'}</span>
+                    </div>
+                  </div>
+
+                  {/* Tags */}
+                  <div className="flex flex-wrap gap-1.5 mt-4">
+                    {(comp.tags || []).slice(0, 3).map((tag, tIdx) => (
+                      <span key={tIdx} className="px-2 py-0.5 text-[10px] bg-slate-800/80 text-slate-300 rounded border border-slate-700/60">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Card CTA */}
+                <div className="pt-5 mt-4 border-t border-slate-800/80 flex items-center gap-2">
+                  <button
+                    onClick={() => onSelectContest(comp)}
+                    className="flex-1 py-2.5 text-xs font-bold rounded-xl bg-slate-800/90 text-slate-200 hover:text-white hover:bg-slate-700/90 border border-slate-700 transition-all cursor-pointer"
+                  >
+                    View Details
+                  </button>
+                  <button
+                    onClick={() => onSelectContest(comp)}
+                    className="px-4 py-2.5 text-xs font-bold rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-md hover:shadow-cyan-500/25 transition-all cursor-pointer"
+                  >
+                    Details
+                  </button>
+                </div>
+
+              </div>
+            ))}
+          </div>
+        )}
+
       </div>
+
     </section>
   );
 };
 
-// Browse By University Section
-const BrowseByUniversity = ({ onSelectUni }) => {
-  const universities = window.CODEBD_DATA.universities;
+const ExploreCompetitionsPage = ({ onSelectContest, onOpenSubmit }) => {
+  const data = window.TALENTSPHERE_DATA;
+  const [competitions, setCompetitions] = useState([]);
+  const categories = (data?.categories || []).filter(category => category.id !== 'all');
+  const [loadState, setLoadState] = useState('loading');
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const [universities, setUniversities] = useState([]);
+  const [query, setQuery] = useState('');
+  const [category, setCategory] = useState('all');
+  const [source, setSource] = useState('all');
+  const [university, setUniversity] = useState('all');
+  const [mode, setMode] = useState('all');
+  const [status, setStatus] = useState('all');
+  const [fee, setFee] = useState('all');
+  const [dateRange, setDateRange] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [sortBy, setSortBy] = useState('deadline');
+  const [savedIds, setSavedIds] = useState(() => {
+    try { const stored = JSON.parse(localStorage.getItem('talentsphere-saved') || '[]'); return Array.isArray(stored) ? stored : []; }
+    catch { return []; }
+  });
+  const [saveError, setSaveError] = useState('');
+
+  function changeFilter(setter, value) { setter(value); setPage(1); }
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const sortMap = { deadline: 'deadline', 'competition-date': 'event_date', recent: 'recent', name: 'title' };
+    const params = new URLSearchParams({ page: String(page), page_size: '12', ordering: sortMap[sortBy] || 'deadline' });
+    if (query.trim()) params.set('search', query.trim());
+    if (category !== 'all') params.set('category', category);
+    if (source === 'university') params.set('host_type', 'university');
+    if (source === 'external') params.set('host_type', 'outside_university');
+    if (university === 'not-university') params.set('host_type', 'outside_university');
+    else if (university !== 'all') params.set('university', university);
+    if (mode !== 'all') params.set('event_mode', mode === 'offline' ? 'in_person' : mode);
+    if (status !== 'all') params.set('registration_status', status);
+    if (fee !== 'all') params.set('registration_fee', fee);
+
+    const today = new Date();
+    const isoDate = value => value.toISOString().slice(0, 10);
+    if (dateRange === 'custom') {
+      if (dateFrom) params.set('date_from', dateFrom);
+      if (dateTo) params.set('date_to', dateTo);
+    } else if (dateRange === 'week') {
+      const start = new Date(today); start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+      const end = new Date(start); end.setDate(end.getDate() + 6);
+      params.set('date_from', isoDate(start)); params.set('date_to', isoDate(end));
+    } else if (dateRange === 'month') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      params.set('date_from', isoDate(start)); params.set('date_to', isoDate(end));
+    }
+
+    setLoadState('loading');
+    getCompetitionPage(params, controller.signal).then(result => {
+      setCompetitions((result.results || []).map(mapCompetitionRecord));
+      setTotalCount(result.count || 0);
+      setTotalPages(Math.max(1, Math.ceil((result.count || 0) / 12)));
+      setUniversities(result.universities || []);
+      setLoadState('ready');
+    }).catch(error => {
+      if (error.name !== 'AbortError') setLoadState('error');
+    });
+    return () => controller.abort();
+  }, [query, category, source, university, mode, status, fee, dateRange, dateFrom, dateTo, sortBy, page]);
+
+  function hostClass(comp) {
+    return comp.hostType === 'university' ? 'university' : comp.hostType === 'outside_university' ? 'external' : 'unknown';
+  }
+  const hasUniversityHosts = universities.length > 0;
+  const hasOutsideUniversityHosts = true;
+
+  function dateValue(value) {
+    if (!value) return null;
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  function eventDate(comp) { return dateValue(comp.targetDate) || dateValue(comp.date); }
+  function formatDate(value) {
+    const parsed = dateValue(value);
+    return parsed ? parsed.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : (value || 'Date not provided');
+  }
+  function registrationStatus(comp) {
+    return comp.status || 'Status not provided';
+  }
+  function modeValue(comp) {
+    const value = [comp.mode, comp.location].filter(Boolean).join(' ').toLowerCase();
+    if (value.includes('hybrid') || (/(online|virtual|remote)/.test(value) && /(onsite|on-site|offline|in person)/.test(value))) return 'hybrid';
+    if (/(online|virtual|remote|sandbox)/.test(value)) return 'online';
+    if (/(offline|onsite|on-site|in person)/.test(value)) return 'offline';
+    return 'unknown';
+  }
+  function feeValue(comp) {
+    const value = comp.registrationFee;
+    if (value === undefined || value === null || value === '') return 'unknown';
+    if (typeof value === 'number') return value <= 0 ? 'free' : 'paid';
+    const normalized = String(value).trim().toLowerCase();
+    if (/^(free|no fee|0|0\.00)$/.test(normalized)) return 'free';
+    if (/paid|\$|৳|€|£|\d/.test(normalized)) return 'paid';
+    return 'unknown';
+  }
+  function dateMatches(comp) {
+    if (dateRange === 'all') return true;
+    const starts = eventDate(comp);
+    if (!starts) return false;
+    const now = new Date();
+    if (dateRange === 'week') {
+      const start = new Date(now); start.setHours(0, 0, 0, 0);
+      start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+      const end = new Date(start); end.setDate(end.getDate() + 7);
+      return starts >= start && starts < end;
+    }
+    if (dateRange === 'month') return starts.getMonth() === now.getMonth() && starts.getFullYear() === now.getFullYear();
+    const min = dateFrom ? new Date(dateFrom + 'T00:00:00') : null;
+    const max = dateTo ? new Date(dateTo + 'T23:59:59') : null;
+    return (!min || starts >= min) && (!max || starts <= max);
+  }
+
+  const filteredCompetitions = competitions;
+
+  function clearFilters() {
+    setQuery(''); setCategory('all'); setSource('all'); setUniversity('all'); setMode('all');
+    setStatus('all'); setFee('all'); setDateRange('all'); setDateFrom(''); setDateTo(''); setSortBy('deadline'); setPage(1);
+    setSaveError('');
+  }
+  function toggleSaved(id) {
+    try {
+      const current = JSON.parse(localStorage.getItem('talentsphere-saved') || '[]');
+      const list = Array.isArray(current) ? current : [];
+      const next = savedIds.includes(id) ? list.filter(item => item !== id) : [...new Set([...list, id])];
+      localStorage.setItem('talentsphere-saved', JSON.stringify(next));
+      setSavedIds(next); setSaveError('');
+    } catch { setSaveError('This browser could not save the competition.'); }
+  }
+  const activeChips = [];
+  if (query.trim()) activeChips.push({ label: `Search: ${query.trim()}`, clear: () => changeFilter(setQuery, '') });
+  if (category !== 'all') activeChips.push({ label: categories.find(item => item.id === category)?.name || category, clear: () => changeFilter(setCategory, 'all') });
+  if (source !== 'all') activeChips.push({ label: source === 'university' ? 'University competitions' : 'Outside-university competitions', clear: () => changeFilter(setSource, 'all') });
+  if (university !== 'all') activeChips.push({ label: university === 'not-university' ? 'Not university-hosted' : university, clear: () => changeFilter(setUniversity, 'all') });
+  if (mode !== 'all') activeChips.push({ label: `Mode: ${mode[0].toUpperCase() + mode.slice(1)}`, clear: () => changeFilter(setMode, 'all') });
+  if (status !== 'all') activeChips.push({ label: status, clear: () => changeFilter(setStatus, 'all') });
+  if (fee !== 'all') activeChips.push({ label: fee === 'unknown' ? 'Fee not provided' : fee === 'free' ? 'Free' : 'Paid', clear: () => changeFilter(setFee, 'all') });
+  if (dateRange !== 'all') activeChips.push({ label: dateRange === 'week' ? 'This week' : dateRange === 'month' ? 'This month' : `Custom dates${dateFrom || dateTo ? `: ${dateFrom || 'any'} – ${dateTo || 'any'}` : ''}`, clear: () => { setDateRange('all'); setDateFrom(''); setDateTo(''); } });
+
+  function FilterControls() {
+    return <div className="competition-filter-controls">
+      <label><span>University</span><select className="form-input form-select" value={university} onChange={event => changeFilter(setUniversity, event.target.value)}>
+        <option value="all">All Universities</option>{universities.map(name => <option key={name} value={name}>{name}</option>)}
+        {hasOutsideUniversityHosts && <option value="not-university">Not University-Hosted</option>}
+      </select></label>
+      <label><span>Competition category</span><select className="form-input form-select" value={category} onChange={event => changeFilter(setCategory, event.target.value)}>
+        <option value="all">All Categories</option>{categories.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
+      </select></label>
+      <label><span>Competition mode</span><select className="form-input form-select" value={mode} onChange={event => changeFilter(setMode, event.target.value)}>
+        <option value="all">All Modes</option><option value="online">Online</option><option value="offline">Offline</option><option value="hybrid">Hybrid</option>
+      </select></label>
+      <label><span>Registration status</span><select className="form-input form-select" value={status} onChange={event => changeFilter(setStatus, event.target.value)}>
+        <option value="all">All Statuses</option><option>Registration Open</option><option>Registration Closed</option><option>In progress</option><option>Completed</option><option>Status not provided</option>
+      </select></label>
+      <label><span>Registration fee</span><select className="form-input form-select" value={fee} onChange={event => changeFilter(setFee, event.target.value)}>
+        <option value="all">All Fees</option><option value="free">Free</option><option value="paid">Paid</option><option value="unknown">Not provided</option>
+      </select></label>
+      <label><span>Competition date</span><select className="form-input form-select" value={dateRange} onChange={event => changeFilter(setDateRange, event.target.value)}>
+        <option value="all">All Dates</option><option value="week">This Week</option><option value="month">This Month</option><option value="custom">Custom Date Range</option>
+      </select></label>
+      {dateRange === 'custom' && <div className="competition-date-inputs">
+        <label><span>From</span><input className="form-input" type="date" value={dateFrom} onChange={event => changeFilter(setDateFrom, event.target.value)} /></label>
+        <label><span>To</span><input className="form-input" type="date" value={dateTo} onChange={event => changeFilter(setDateTo, event.target.value)} /></label>
+      </div>}
+      <button type="button" className="competition-clear-button" onClick={clearFilters}>Clear All Filters</button>
+    </div>;
+  }
+
+  return <>
+    <section className="competition-explore-hero bg-radial-gradient">
+      <div className="page-container competition-hero-inner">
+        <div className="competition-hero-copy">
+          <span className="eyebrow"><Icon name="code2" className="w-4 h-4" />Talent Square · Computer Science & Engineering</span>
+          <h1>Explore <span className="gradient-text-hero">CSE Competitions</span></h1>
+          <p>Discover programming contests, hackathons, datathons, AI challenges, cybersecurity competitions, and more — all in one place.</p>
+          <button type="button" className="competition-host-button" onClick={onOpenSubmit}><Icon name="rocket" className="w-4 h-4" />Host a competition</button>
+        </div>
+        <label className="competition-search-box">
+          <Icon name="search" className="w-5 h-5" />
+          <input type="search" aria-label="Search competitions, universities, organizers, categories, and tags" value={query} onChange={event => changeFilter(setQuery, event.target.value)} placeholder="Search competitions, universities, organizers..." />
+          {query && <button type="button" aria-label="Clear search" onClick={() => changeFilter(setQuery, '')}><Icon name="x" className="w-4 h-4" /></button>}
+        </label>
+      </div>
+    </section>
+
+    <section className="competition-discovery page-container" aria-labelledby="competition-types-title">
+      <div className="competition-section-heading"><div><span className="eyebrow">FIND YOUR NEXT CHALLENGE</span><h2 id="competition-types-title">Browse by Competition Type</h2></div>
+        <span className="competition-scope-note">CSE competitions only</span></div>
+      <div className="competition-category-grid">
+        <button type="button" className={`competition-category-card ${category === 'all' ? 'is-active' : ''}`} aria-pressed={category === 'all'} onClick={() => changeFilter(setCategory, 'all')}>
+          <span className="competition-category-icon"><Icon name="layoutgrid" className="w-5 h-5" /></span><strong>All Competitions</strong>
+        </button>
+          {categories.map(item => <button type="button" key={item.id} className={`competition-category-card ${category === item.id ? 'is-active' : ''}`} aria-pressed={category === item.id} onClick={() => changeFilter(setCategory, item.id)}>
+          <span className="competition-category-icon"><Icon name={item.icon} className="w-5 h-5" /></span><strong>{item.name}</strong>
+        </button>)}
+      </div>
+    </section>
+
+    <section className="competition-listing-section" aria-labelledby="available-competitions-title">
+      <div className="page-container">
+        <div className="competition-source-tabs" role="group" aria-label="Competition host type">
+          {[['all', 'All Competitions'], ['university', 'University Competitions'], ['external', 'Outside-University Competitions']].map(([id, label]) =>
+            <button type="button" key={id} aria-pressed={source === id} className={source === id ? 'is-active' : ''} onClick={() => changeFilter(setSource, id)}>{label}</button>)}
+        </div>
+        <div className="competition-results-layout">
+          <aside className="competition-filter-sidebar" aria-label="Competition filters"><div className="competition-filter-heading"><h2>Filters</h2><span>Combine any options</span></div><FilterControls /></aside>
+          <details className="competition-mobile-filters"><summary><Icon name="layoutgrid" className="w-4 h-4" /> Filters{activeChips.length ? ` (${activeChips.length})` : ''}</summary><FilterControls /></details>
+          <div className="competition-results">
+            <div className="competition-results-header">
+              <div><span className="eyebrow">APPROVED LISTINGS</span><h2 id="available-competitions-title">Available Competitions</h2>
+                <p aria-live="polite">{loadState === 'ready' ? `${totalCount} published ${totalCount === 1 ? 'competition' : 'competitions'}` : 'Loading published competitions'}</p></div>
+              <label className="competition-sort"><span>Sort by</span><select className="form-input form-select" value={sortBy} onChange={event => changeFilter(setSortBy, event.target.value)}>
+                <option value="deadline">Registration Deadline: Soonest</option><option value="recent">Recently Added</option><option value="competition-date">Competition Date: Soonest</option><option value="name">Competition Name: A–Z</option>
+              </select></label>
+            </div>
+            <div className="competition-active-filters" aria-label="Active filters">
+              {activeChips.map((chip, index) => <button type="button" key={`${chip.label}-${index}`} onClick={chip.clear} aria-label={`Remove ${chip.label} filter`}>{chip.label}<Icon name="x" className="w-3 h-3" /></button>)}
+              {activeChips.length > 0 && <button type="button" className="competition-clear-inline" onClick={clearFilters}>Clear all</button>}
+            </div>
+
+            {loadState === 'loading' && <div className="competition-state" role="status"><span className="loading-ring" /><h3>Loading competitions</h3><p>Checking administrator-approved listings.</p></div>}
+            {loadState === 'error' && <div className="competition-state" role="alert"><Icon name="info" className="w-8 h-8" /><h3>Competitions could not be loaded</h3><p>The Django competition service did not respond. Try again when the backend is running.</p><button className="button-secondary" onClick={() => window.location.reload()}>Retry</button></div>}
+            {loadState === 'ready' && totalCount === 0 && <div className="competition-state"><Icon name="trophy" className="w-8 h-8" /><h3>No published competitions match these filters</h3><p>Only approved CSE competitions appear here. Try another filter or check back after an administrator approves a submission.</p><button type="button" className="button-secondary" onClick={clearFilters}>Clear Filters</button></div>}
+            {loadState === 'ready' && filteredCompetitions.length > 0 && <div className="competition-card-grid">
+              {filteredCompetitions.map(comp => {
+                const compCategory = categories.find(item => item.id === comp.category);
+                const currentStatus = registrationStatus(comp);
+                const hostName = comp.hostOrganization || comp.university || 'Host affiliation not provided';
+                const displayMode = comp.mode || (modeValue(comp) === 'unknown' ? 'Mode not provided' : modeValue(comp));
+                return <article className="competition-list-card" key={comp.id}>
+                  <div className="competition-card-topline"><span className="competition-category-badge">{compCategory?.name || comp.type || 'CSE Competition'}</span><span className={`competition-status-badge status-${currentStatus.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{currentStatus}</span></div>
+                  <span className="competition-sample-label"><Icon name={comp.submissionSource==='imported'?'layoutgrid':'users'} className="w-3 h-3" /> {comp.submissionSource==='imported'?'Imported from '+(comp.sourceName||'external source'):'Organizer listing'}</span>
+                  {comp.submissionSource==='imported'&&comp.sourceCheckedAt&&<span className="competition-source-checked">Source checked {new Date(comp.sourceCheckedAt).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}</span>}
+                  <h3>{comp.title || 'Competition title not provided'}</h3>
+                  <dl className="competition-card-details">
+                    <div><dt>Organizer</dt><dd>{comp.organizer || 'Organizer not provided'}</dd></div>
+                    <div><dt>Host</dt><dd>{hostName}</dd></div>
+                    <div><dt>Mode</dt><dd>{displayMode}</dd></div>
+                    <div><dt>Competition date</dt><dd>{comp.date || formatDate(comp.targetDate)}</dd></div>
+                    <div><dt>Registration deadline</dt><dd>{formatDate(comp.deadline)}</dd></div>
+                    <div><dt>Prize pool</dt><dd>{comp.prizePool || 'Prize not provided'}</dd></div>
+                  </dl>
+                  {Array.isArray(comp.tags) && comp.tags.length > 0 && <div className="competition-card-tags">{comp.tags.slice(0, 3).map((tag, index) => <span key={`${tag}-${index}`}>#{tag}</span>)}</div>}
+                  <div className="competition-card-actions"><button type="button" className="competition-details-button" onClick={() => onSelectContest(comp)}>View Details</button>
+                    <button type="button" className={`competition-save-button ${savedIds.includes(comp.id) ? 'is-saved' : ''}`} aria-pressed={savedIds.includes(comp.id)} aria-label={savedIds.includes(comp.id) ? `Remove ${comp.title} from saved competitions` : `Save ${comp.title}`} onClick={() => toggleSaved(comp.id)}><Icon name={savedIds.includes(comp.id) ? 'checkcircle2' : 'sparkles'} className="w-4 h-4" /><span>{savedIds.includes(comp.id) ? 'Saved' : 'Save'}</span></button></div>
+                </article>;
+              })}
+            </div>}
+            {loadState === 'ready' && totalPages > 1 && <nav className="competition-pagination" aria-label="Competition pages">
+              <button type="button" className="button-secondary" disabled={page <= 1} onClick={() => setPage(value => Math.max(1, value - 1))}>Previous</button>
+              <span>Page {page} of {totalPages}</span>
+              <button type="button" className="button-secondary" disabled={page >= totalPages} onClick={() => setPage(value => Math.min(totalPages, value + 1))}>Next</button>
+            </nav>}
+            {saveError && <p role="alert" className="competition-save-error">{saveError}</p>}
+          </div>
+        </div>
+      </div>
+    </section>
+  </>;
+};
+
+// =========================================================================
+// 9. JOB FAIR SECTION (EVENT CARDS, RECRUITER BOOTHS, HIRING TRACKS)
+// =========================================================================
+const JobFairSection = ({ onSelectFair, onOpenAuth, items }) => {
+  const jobFairs = items || window.TALENTSPHERE_DATA?.jobFairs || [];
 
   return (
-    <section id="universities" className="py-20 relative">
+    <section id="jobfairs" className="py-20 bg-[#060911] relative border-t border-slate-800/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-10 gap-4">
-          <div>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-500/10 border border-blue-500/20 text-blue-400 text-xs font-semibold uppercase tracking-wider mb-2">
-              <Icon name="GraduationCap" className="w-3.5 h-3.5" />
-              <span>Campus Ecosystem</span>
+        {/* Section Header */}
+        <div className="text-center max-w-3xl mx-auto mb-12">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-xs font-semibold text-purple-400 mb-3">
+            <Icon name="briefcase" className="w-3.5 h-3.5" />
+            <span>Fast-Track Career Pipelines</span>
+          </div>
+          <h2 className="font-heading font-black text-3xl sm:text-4xl text-white">
+            Attend Premier Tech Job Fairs
+          </h2>
+          <p className="text-sm text-slate-300 mt-2">
+            Top contest performers get direct access to tech titans and fast-growing unicorns. Schedule virtual 1-on-1 interviews, showcase your ranking badges, and land your dream offer.
+          </p>
+        </div>
+
+        {/* Job Fair Cards */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {jobFairs.map(fair => (
+            <div
+              key={fair.id}
+              className="glass-card rounded-2xl p-6 border border-slate-800 flex flex-col justify-between hover:border-purple-500/40 transition-all group"
+            >
+              <div>
+                <div className="flex items-center justify-between mb-3">
+                  <span className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    {fair.badge}
+                  </span>
+                  <span className="text-xs font-mono-code text-cyan-400">
+                    {fair.dates}
+                  </span>
+                </div>
+
+                <h3 className="font-heading font-bold text-xl text-white group-hover:text-purple-300 transition-colors">
+                  {fair.title}
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 font-medium">
+                  {fair.organizer} &middot; {fair.mode}
+                </p>
+
+                <p className="text-xs text-slate-300 mt-3 line-clamp-3 leading-relaxed">
+                  {fair.description}
+                </p>
+
+                {/* Key Metrics */}
+                <div className="grid grid-cols-3 gap-2 my-4 p-3 rounded-xl bg-slate-900/90 border border-slate-800/80 text-center">
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase block">Talent</span>
+                    <span className="font-bold text-white text-xs">{fair.attendeesCount}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase block">Companies</span>
+                    <span className="font-bold text-purple-400 text-xs">{fair.companiesCount}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-500 uppercase block">Open Roles</span>
+                    <span className="font-bold text-emerald-400 text-xs">{fair.openPositions}</span>
+                  </div>
+                </div>
+
+                {/* Featured Participating Companies */}
+                <div>
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider block mb-2">
+                    Featured Hiring Partners
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {fair.participatingCompanies.slice(0, 4).map((comp, cIdx) => (
+                      <span key={cIdx} className="px-2.5 py-1 rounded-lg bg-slate-800 text-xs font-medium text-slate-200 border border-slate-700">
+                        {comp.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Card Action */}
+              <div className="pt-6 mt-4 border-t border-slate-800 flex items-center gap-3">
+                <button
+                  onClick={() => onSelectFair(fair)}
+                  className="w-full py-2.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-500 via-indigo-600 to-blue-600 text-white shadow-lg shadow-purple-500/20 hover:shadow-purple-500/40 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Icon name="briefcase" className="w-4 h-4" />
+                  <span>View Fair Details</span>
+                </button>
+              </div>
+
             </div>
-            <h2 className="font-heading font-black text-3xl sm:text-4xl text-white tracking-tight">
-              Browse By University
-            </h2>
-            <p className="text-slate-400 text-sm sm:text-base mt-1">
-              Explore contests organized by leading engineering and tech departments across Bangladesh.
+          ))}
+        </div>
+
+        {/* Recruiter Callout */}
+        <div className="mt-12 p-6 rounded-2xl glass-card border border-purple-500/30 bg-gradient-to-r from-purple-950/20 via-slate-900 to-indigo-950/20 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div className="space-y-1 text-center md:text-left">
+            <h4 className="font-heading font-bold text-lg text-white">
+              Are you hiring top software engineers, AI researchers, or product designers?
+            </h4>
+            <p className="text-xs text-slate-400 max-w-2xl">
+              Host a hiring booth, sponsor prize tracks, and evaluate pre-vetted contestants ranked across ICPC contests and hackathons.
             </p>
           </div>
-
           <button
-            onClick={() => onSelectUni({ short: "All", fullName: "All Bangladeshi Universities" })}
-            className="text-cyan-400 hover:text-cyan-300 font-semibold text-xs sm:text-sm flex items-center gap-1 group cursor-pointer"
+            onClick={() => onOpenAuth('role-select')}
+            className="px-5 py-2.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-500 rounded-xl shadow-lg shadow-purple-500/20 whitespace-nowrap cursor-pointer transition-colors"
           >
-            <span>View All Universities (45+)</span>
-            <Icon name="ArrowRight" className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            Create Recruiter Account
           </button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-          {universities.map((uni) => (
-            <div
-              key={uni.id}
-              onClick={() => onSelectUni(uni)}
-              className="glass-card rounded-2xl p-4 text-center cursor-pointer group flex flex-col items-center justify-between h-44 hover:border-cyan-500/50"
-            >
-              <div className="w-full flex justify-between items-center text-[10px] text-slate-500">
-                <span>{uni.city}</span>
-                <span className="text-cyan-400 font-mono-code font-bold">{uni.contestsCount} Contests</span>
-              </div>
+      </div>
+    </section>
+  );
+};
 
-              <div className={`w-14 h-14 rounded-2xl bg-gradient-to-tr ${uni.color} p-0.5 shadow-lg group-hover:scale-110 transition-transform my-auto`}>
-                <div className="w-full h-full bg-[#0a0f1d] rounded-[14px] flex items-center justify-center font-heading font-black text-lg text-white">
-                  {uni.short}
-                </div>
-              </div>
+// =========================================================================
+// 10. RANKINGS & LEADERBOARD SECTION
+// =========================================================================
+const RankingsSection = () => {
+  const [activeTab, setActiveTab] = useState('global');
+  const [rankingSearch, setRankingSearch] = useState('');
 
-              <div>
-                <h4 className="font-heading font-bold text-sm text-white group-hover:text-cyan-300 transition-colors">
-                  {uni.short}
-                </h4>
-                <p className="text-[10px] text-slate-400 line-clamp-1">
-                  {uni.fullName}
-                </p>
-              </div>
+  const rankingData = window.TALENTSPHERE_DATA?.rankings || { categories: [], topTalent: [], universityRankings: [] };
+
+  const filteredTalent = useMemo(() => {
+    return rankingData.topTalent.filter(item => {
+      const matchCat = activeTab === 'global' || item.category === activeTab;
+      const q = rankingSearch.toLowerCase().trim();
+      const matchSearch = !q || (
+        item.name.toLowerCase().includes(q) ||
+        item.handle.toLowerCase().includes(q) ||
+        item.institution.toLowerCase().includes(q)
+      );
+      return matchCat && matchSearch;
+    });
+  }, [activeTab, rankingSearch, rankingData]);
+
+  const filteredUniversities = rankingData.universityRankings.filter(uni =>
+    uni.name.toLowerCase().includes(rankingSearch.toLowerCase().trim()));
+
+  return (
+    <section id="rankings" className="py-20 bg-[#070a13] relative border-t border-slate-800/80">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        
+        {/* Section Header */}
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+          <div>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20 text-xs font-semibold text-amber-400 mb-2">
+              <Icon name="trendingup" className="w-3.5 h-3.5" />
+              <span>Verified Skill Standing</span>
             </div>
+            <h2 className="font-heading font-black text-3xl sm:text-4xl text-white">
+              Platform Rankings &amp; Leaderboards
+            </h2>
+            <p className="text-sm text-slate-400 mt-1">
+              Live ratings earned through verified contest podiums, algorithm battles, and evaluated project submissions.
+            </p>
+          </div>
+
+          <div className="w-full md:w-72 relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">
+              <Icon name="search" className="w-4 h-4" />
+            </div>
+            <input
+              type="text"
+              placeholder="Search contestants, handles, unis..."
+              aria-label="Search rankings"
+              value={rankingSearch}
+              onChange={(e) => setRankingSearch(e.target.value)}
+              className="form-input pl-9 text-xs"
+            />
+          </div>
+        </div>
+
+        {/* Tab Buttons */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-6 scrollbar-none">
+          {rankingData.categories.map(cat => (
+            <button
+              key={cat.id}
+              onClick={() => setActiveTab(cat.id)}
+              aria-pressed={activeTab === cat.id}
+              className={`px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === cat.id
+                  ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20'
+                  : 'bg-slate-900/80 text-slate-300 border border-slate-800 hover:text-white'
+              }`}
+            >
+              {cat.label}
+            </button>
           ))}
         </div>
 
-      </div>
-    </section>
-  );
-};
-
-// Call To Action (Host/Submit a Competition)
-const CtaSection = ({ onSubmitContest }) => {
-  return (
-    <section className="py-20 relative overflow-hidden">
-      <div className="absolute inset-0 bg-gradient-to-t from-cyan-950/20 via-slate-900/40 to-transparent pointer-events-none"></div>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-        <div className="glass-panel rounded-3xl p-8 sm:p-14 border border-cyan-500/30 text-center relative overflow-hidden shadow-2xl">
-          
-          <div className="absolute inset-0 bg-dots-pattern opacity-30 pointer-events-none"></div>
-          <div className="absolute -top-24 -left-24 w-72 h-72 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
-          <div className="absolute -bottom-24 -right-24 w-72 h-72 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
-
-          <div className="max-w-3xl mx-auto space-y-6 relative z-10">
-            
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-bold uppercase tracking-wider">
-              <Icon name="Radio" className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
-              <span>For University Clubs & Tech Organizers</span>
+        {/* Table / Rankings Display */}
+        {activeTab === 'university' ? (
+          /* University Standings Table */
+          <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800 shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs sm:text-sm">
+                <thead className="bg-slate-900/90 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800">
+                  <tr>
+                    <th className="py-3.5 px-4 sm:px-6">Rank</th>
+                    <th className="py-3.5 px-4">University / Institution</th>
+                    <th className="py-3.5 px-4 text-center">Active Participants</th>
+                    <th className="py-3.5 px-4 text-center">Podium Finishes</th>
+                    <th className="py-3.5 px-4 sm:px-6 text-right">Points</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-medium text-slate-200">
+                  {!filteredUniversities.length && <tr><td colSpan={5} className="text-center p-10 text-slate-400">No universities found. Try another name.</td></tr>}
+                  {filteredUniversities.map((uni, idx) => (
+                    <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-4 px-4 sm:px-6">
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg font-bold font-mono-code text-xs ${
+                          uni.rank === 1 ? 'bg-amber-500 text-black' :
+                          uni.rank === 2 ? 'bg-slate-300 text-black' :
+                          uni.rank === 3 ? 'bg-amber-700 text-white' :
+                          'bg-slate-800 text-slate-300'
+                        }`}>
+                          #{uni.rank}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4">
+                        <div className="font-heading font-bold text-white flex items-center gap-2">
+                          <Icon name="graduationcap" className="w-4 h-4 text-cyan-400" />
+                          <span>{uni.name}</span>
+                        </div>
+                      </td>
+                      <td className="py-4 px-4 text-center font-mono-code text-slate-300">
+                        {uni.participants}
+                      </td>
+                      <td className="py-4 px-4 text-center font-mono-code text-emerald-400 font-bold">
+                        {uni.podiums}
+                      </td>
+                      <td className="py-4 px-4 sm:px-6 text-right font-mono-code font-bold text-cyan-400">
+                        {uni.points.toLocaleString()} pts
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-
-            <h2 className="font-heading font-black text-3xl sm:text-5xl text-white tracking-tight leading-tight">
-              Organizing a Coding Competition?
-            </h2>
-
-            <p className="text-slate-300 text-base sm:text-lg leading-relaxed">
-              Reach thousands of CSE students across Bangladesh by listing your competition on CodeBD. Get maximum participation, automated reminders, and instant national visibility.
-            </p>
-
-            <div className="flex flex-wrap justify-center gap-6 text-xs text-slate-300 pt-2 font-medium">
-              <span className="flex items-center gap-1.5">
-                <Icon name="CheckCircle2" className="w-4 h-4 text-emerald-400" />
-                100% Free Listing
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Icon name="CheckCircle2" className="w-4 h-4 text-emerald-400" />
-                Reach 45+ Universities
-              </span>
-              <span className="flex items-center gap-1.5">
-                <Icon name="CheckCircle2" className="w-4 h-4 text-emerald-400" />
-                Toph / VJudge / Codeforces Sync
-              </span>
-            </div>
-
-            <div className="pt-4">
-              <button
-                onClick={onSubmitContest}
-                className="px-8 py-4 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-extrabold text-base shadow-xl shadow-cyan-500/30 hover:shadow-cyan-500/50 hover:scale-105 active:scale-95 transition-all inline-flex items-center gap-2 cursor-pointer"
-              >
-                <Icon name="Send" className="w-4 h-4" />
-                <span>Submit Your Competition</span>
-              </button>
-            </div>
-
           </div>
+        ) : (
+          /* Participant Talent Standings Table */
+          <div className="glass-panel rounded-2xl overflow-hidden border border-slate-800 shadow-xl">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs sm:text-sm">
+                <thead className="bg-slate-900/90 text-slate-400 uppercase text-[11px] font-semibold border-b border-slate-800">
+                  <tr>
+                    <th className="py-3.5 px-4 sm:px-6">Rank</th>
+                    <th className="py-3.5 px-4">Participant</th>
+                    <th className="py-3.5 px-4">Institution / Org</th>
+                    <th className="py-3.5 px-4">Badges &amp; Status</th>
+                    <th className="py-3.5 px-4 text-center">Contests Won</th>
+                    <th className="py-3.5 px-4 sm:px-6 text-right">Rating Points</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60 font-medium text-slate-200">
+                  {!filteredTalent.length && <tr><td colSpan={6} className="text-center p-10 text-slate-400">No participants found. Try another name or category.</td></tr>}
+                  {filteredTalent.map((person, idx) => (
+                    <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-4 px-4 sm:px-6">
+                        <span className={`inline-flex items-center justify-center w-7 h-7 rounded-lg font-bold font-mono-code text-xs ${
+                          person.rank === 1 ? 'bg-amber-500 text-black shadow-md shadow-amber-500/20' :
+                          person.rank === 2 ? 'bg-slate-300 text-black' :
+                          person.rank === 3 ? 'bg-amber-700 text-white' :
+                          'bg-slate-800 text-slate-300'
+                        }`}>
+                          #{person.rank}
+                        </span>
+                      </td>
+                      <td className="py-4 px-4">
+                        <div className="font-heading font-bold text-white flex items-center gap-1.5">
+                          <span>{person.name}</span>
+                          <span className="text-[11px] text-cyan-400 font-mono-code font-normal">{person.handle}</span>
+                        </div>
+                        <div className="text-[11px] text-slate-400">{person.title}</div>
+                      </td>
+                      <td className="py-4 px-4 text-slate-300">
+                        {person.institution}
+                      </td>
+                      <td className="py-4 px-4">
+                        <div className="flex flex-wrap gap-1.5">
+                          {person.badges.map((b, bIdx) => (
+                            <span key={bIdx} className="px-2 py-0.5 text-[10px] font-semibold bg-slate-800 text-slate-300 rounded border border-slate-700">
+                              {b}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="py-4 px-4 text-center font-mono-code text-emerald-400 font-bold">
+                        {person.contestsWon}
+                      </td>
+                      <td className="py-4 px-4 sm:px-6 text-right font-mono-code font-bold text-cyan-300">
+                        {person.rating} / {person.points} pts
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
-        </div>
       </div>
     </section>
   );
 };
 
-// Footer Component
-const Footer = ({ onNavigateSection, onOpenSubmit, onOpenAuth, onShowToast }) => {
-  const [emailInput, setEmailInput] = useState('');
-
-  const handleSubscribe = (e) => {
-    e.preventDefault();
-    if (emailInput.trim()) {
-      onShowToast("Subscribed! You'll receive Bangladesh contest alerts.");
-      setEmailInput('');
-    }
-  };
-
+// =========================================================================
+// 11. FOOTER
+// =========================================================================
+const Footer = ({ onOpenAuth, onOpenSubmit, onNavigateSection }) => {
   return (
-    <footer className="bg-[#05070c] border-t border-slate-800/80 pt-16 pb-12 text-slate-400 text-xs">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-12">
-        
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8">
+    <footer className="bg-[#04060b] border-t border-slate-800/80 py-12 text-xs text-slate-400">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-8">
           
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-600 to-blue-600 p-0.5">
-                <div className="w-full h-full bg-[#090d16] rounded-[10px] flex items-center justify-center font-mono-code font-bold text-cyan-400 text-sm">
-                  &lt;/&gt;
-                </div>
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500 flex items-center justify-center text-black font-bold">
+                <Icon name="zap" className="w-5 h-5 text-black" />
               </div>
-              <span className="font-heading font-black text-2xl text-white">
-                Code<span className="text-cyan-400">BD</span>
+              <span className="font-heading font-black text-lg text-white">
+                Talent{' '}<span className="text-cyan-400">Square</span>
               </span>
             </div>
-
-            <p className="text-slate-400 text-xs leading-relaxed max-w-sm">
-              CodeBD is a centralized platform for discovering coding competitions and programming events across Bangladesh.
+            <p className="text-xs leading-relaxed text-slate-400">
+              The premier ecosystem for collegiate hackathons, talent verification, job fairs, and verified engineering ratings.
             </p>
-
-            <div className="pt-2">
-              <span className="text-[11px] text-slate-500 block mb-2 font-semibold uppercase tracking-wider">
-                Get Weekly Contest Alerts
-              </span>
-              <form onSubmit={handleSubscribe} className="flex gap-2 max-w-sm">
-                <input
-                  type="email"
-                  placeholder="your.email@buet.ac.bd"
-                  value={emailInput}
-                  onChange={(e) => setEmailInput(e.target.value)}
-                  className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 flex-1"
-                  required
-                />
-                <button
-                  type="submit"
-                  className="px-3.5 py-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-black font-bold text-xs transition-colors cursor-pointer"
-                >
-                  Join
-                </button>
-              </form>
-            </div>
           </div>
 
-          <div className="space-y-3">
-            <h4 className="font-heading font-bold text-sm text-white uppercase tracking-wider">Platform</h4>
-            <ul className="space-y-2">
-              <li><a href="#competitions" onClick={(e) => { e.preventDefault(); onNavigateSection('competitions'); }} className="hover:text-cyan-400 transition-colors">Competitions</a></li>
-              <li><a href="#universities" onClick={(e) => { e.preventDefault(); onNavigateSection('universities'); }} className="hover:text-cyan-400 transition-colors">Universities</a></li>
-              <li><a href="#categories" onClick={(e) => { e.preventDefault(); onNavigateSection('categories'); }} className="hover:text-cyan-400 transition-colors">Categories</a></li>
-              <li><a href="#hero" onClick={(e) => { e.preventDefault(); onNavigateSection('hero'); }} className="hover:text-cyan-400 transition-colors">National Leaderboard</a></li>
-              <li><a href="#competitions" onClick={(e) => { e.preventDefault(); onNavigateSection('competitions'); }} className="hover:text-cyan-400 transition-colors">CP Resources</a></li>
-            </ul>
-          </div>
-
-          <div className="space-y-3">
-            <h4 className="font-heading font-bold text-sm text-white uppercase tracking-wider">For Students</h4>
-            <ul className="space-y-2">
-              <li><a href="#competitions" onClick={(e) => { e.preventDefault(); onNavigateSection('competitions'); }} className="hover:text-cyan-400 transition-colors">Find Competitions</a></li>
-              <li><a href="#competitions" onClick={(e) => { e.preventDefault(); onNavigateSection('competitions'); }} className="hover:text-cyan-400 transition-colors">Track Contests</a></li>
-              <li><a href="#" onClick={(e) => { e.preventDefault(); onOpenAuth('register'); }} className="hover:text-cyan-400 transition-colors">Build Your Profile</a></li>
-              <li><a href="#" onClick={(e) => { e.preventDefault(); onShowToast("ICPC Syllabus 2026 coming soon!"); }} className="hover:text-cyan-400 transition-colors">ICPC Preparation Guide</a></li>
-              <li><a href="#" onClick={(e) => { e.preventDefault(); onShowToast("Practice Arena in Beta."); }} className="hover:text-cyan-400 transition-colors">Practice Virtual Contests</a></li>
-            </ul>
-          </div>
-
-          <div className="space-y-3">
-            <h4 className="font-heading font-bold text-sm text-white uppercase tracking-wider">For Organizers</h4>
-            <ul className="space-y-2">
-              <li><a href="#" onClick={(e) => { e.preventDefault(); onOpenSubmit(); }} className="hover:text-cyan-400 transition-colors font-semibold text-cyan-300">Submit Competition</a></li>
-              <li><a href="#" onClick={(e) => { e.preventDefault(); onOpenSubmit(); }} className="hover:text-cyan-400 transition-colors">Promote Event</a></li>
-              <li><a href="#" onClick={(e) => { e.preventDefault(); onShowToast("Partner with CodeBD: partner@codebd.org"); }} className="hover:text-cyan-400 transition-colors">Sponsorships</a></li>
-            </ul>
-
-            <h4 className="font-heading font-bold text-sm text-white uppercase tracking-wider pt-2">Contact</h4>
-            <div className="flex gap-3 text-slate-400">
-              <a href="mailto:hello@codebd.org" className="hover:text-cyan-400" title="Email"><Icon name="Mail" className="w-4 h-4" /></a>
-              <a href="https://facebook.com" target="_blank" rel="noreferrer" className="hover:text-cyan-400" title="Facebook"><Icon name="Facebook" className="w-4 h-4" /></a>
-              <a href="https://linkedin.com" target="_blank" rel="noreferrer" className="hover:text-cyan-400" title="LinkedIn"><Icon name="Linkedin" className="w-4 h-4" /></a>
-              <a href="https://github.com" target="_blank" rel="noreferrer" className="hover:text-cyan-400" title="GitHub"><Icon name="Github" className="w-4 h-4" /></a>
-            </div>
-          </div>
-
-        </div>
-
-        <div className="pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4 text-slate-500 text-[11px]">
           <div>
-            © 2026 CodeBD. All rights reserved. Built with ❤️ for Bangladesh's CSE community.
+            <h4 className="font-heading font-bold text-white mb-3 text-sm">Primary Actions</h4>
+            <ul className="space-y-2">
+              <li><button onClick={() => onOpenAuth('login')} className="hover:text-cyan-400">1. Login</button></li>
+              <li><button onClick={() => onOpenAuth('role-select')} className="hover:text-cyan-400">2. Register</button></li>
+              <li><button onClick={onOpenSubmit} className="hover:text-cyan-400">3. Submit Competition</button></li>
+              <li><button onClick={() => onNavigateSection('competitions')} className="hover:text-cyan-400">4. Explore Competitions</button></li>
+              <li><button onClick={() => onNavigateSection('jobfairs')} className="hover:text-cyan-400">5. Job Fair</button></li>
+              <li><button onClick={() => onNavigateSection('rankings')} className="hover:text-cyan-400">6. Platform Rankings</button></li>
+            </ul>
           </div>
-          <div className="flex items-center gap-4">
-            <a href="#" className="hover:text-slate-400">Privacy Policy</a>
-            <span>•</span>
-            <a href="#" className="hover:text-slate-400">Terms of Service</a>
-            <span>•</span>
-            <span className="text-emerald-400 font-mono-code font-bold">Server: Dhaka (BD-IX)</span>
+
+          <div>
+            <h4 className="font-heading font-bold text-white mb-3 text-sm">Account Roles</h4>
+            <ul className="space-y-2">
+              <li><button onClick={() => onNavigateSection('participant')} className="hover:text-cyan-400">Participant workspace</button></li>
+              <li><button onClick={() => onNavigateSection('organizer')} className="hover:text-cyan-400">Organizer workspace</button></li>
+              <li><button onClick={() => onNavigateSection('recruiter')} className="hover:text-cyan-400">Recruiter workspace</button></li>
+              <li><button onClick={() => onNavigateSection('admin')} className="hover:text-cyan-400">Admin preview</button></li>
+              <li><button onClick={() => onOpenAuth('forgot-password')} className="hover:text-cyan-400">Password Recovery</button></li>
+            </ul>
           </div>
+
+          <div>
+            <h4 className="font-heading font-bold text-white mb-3 text-sm">Your next chapter starts here</h4>
+            <p className="text-xs leading-relaxed text-slate-400">Discover your next challenge, connect with ambitious people, and turn your skills into opportunities.</p>
+            <a href="/help" className="inline-flex items-center gap-2 mt-4 text-cyan-300 hover:text-white">Help & contact <span aria-hidden="true">→</span></a>
+            <p className="text-xs text-cyan-400 mt-4">Frontend preview · Sample events and rankings</p>
+          </div>
+
         </div>
 
+        <div className="pt-8 border-t border-slate-800/80 flex flex-col sm:flex-row items-center justify-between gap-4">
+          <p>&copy; 2026 Talent Square. All rights reserved.</p>
+          <nav aria-label="Support and policies" className="flex flex-wrap justify-center items-center gap-4 text-slate-400">
+            <a href="/help" className="hover:text-cyan-300">Help & contact</a>
+            <a href="/privacy" className="hover:text-cyan-300">Privacy policy</a>
+            <a href="/terms" className="hover:text-cyan-300">Terms of use</a>
+          </nav>
+        </div>
       </div>
     </footer>
   );
 };
 
-// Competition Details Modal
-const CompetitionModal = ({ contest, onClose, onRegister, onBookmarkToggle, isBookmarked }) => {
-  if (!contest) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0b111e] border border-slate-700/80 rounded-2xl max-w-2xl w-full p-6 max-h-[90vh] overflow-y-auto space-y-6 shadow-2xl relative">
-        
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white border border-slate-800 cursor-pointer"
-        >
-          <Icon name="X" className="w-4 h-4" />
-        </button>
-
-        <div className="flex items-start gap-4">
-          <div className="w-14 h-14 rounded-2xl bg-cyan-950/80 border border-cyan-500/40 text-cyan-300 font-heading font-black text-xl flex items-center justify-center shrink-0">
-            {contest.university || "BD"}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded text-[11px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-500/30">
-                {contest.status || "Open"}
-              </span>
-              <span className="text-xs text-slate-400">{contest.organizer}</span>
-            </div>
-            <h3 className="font-heading font-extrabold text-2xl text-white mt-1">
-              {contest.title}
-            </h3>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-          <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-            <span className="text-slate-500 block text-[10px]">Date</span>
-            <span className="font-bold text-white">{contest.date}</span>
-          </div>
-          <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-            <span className="text-slate-500 block text-[10px]">Prize Pool</span>
-            <span className="font-bold text-amber-300 font-mono-code">{contest.prizePool}</span>
-          </div>
-          <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-            <span className="text-slate-500 block text-[10px]">Team Size</span>
-            <span className="font-bold text-cyan-300">{contest.teamSize}</span>
-          </div>
-          <div className="bg-slate-900/80 p-3 rounded-xl border border-slate-800">
-            <span className="text-slate-500 block text-[10px]">Format</span>
-            <span className="font-bold text-purple-300">{contest.type}</span>
-          </div>
-        </div>
-
-        <div className="space-y-3 text-xs leading-relaxed text-slate-300">
-          <div>
-            <h4 className="font-bold text-sm text-white mb-1">About the Contest</h4>
-            <p>{contest.description}</p>
-          </div>
-
-          {contest.eligibility && (
-            <div className="bg-slate-900/50 p-3 rounded-xl border border-slate-800">
-              <h4 className="font-bold text-white mb-1">Eligibility</h4>
-              <p className="text-slate-400">{contest.eligibility}</p>
-            </div>
-          )}
-
-          {contest.platform && (
-            <div className="flex items-center gap-2 text-xs">
-              <span className="text-slate-400">Contest Platform:</span>
-              <span className="font-mono-code text-cyan-400 font-semibold">{contest.platform}</span>
-            </div>
-          )}
-        </div>
-
-        <div className="pt-4 border-t border-slate-800 flex items-center justify-end gap-3">
-          <button
-            onClick={() => onBookmarkToggle(contest.id)}
-            className="px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 hover:text-white text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
-          >
-            <Icon name="Bookmark" className={`w-4 h-4 ${isBookmarked ? 'fill-cyan-400 text-cyan-400' : ''}`} />
-            <span>{isBookmarked ? 'Bookmarked' : 'Bookmark'}</span>
-          </button>
-
-          <button
-            onClick={() => {
-              onClose();
-              onRegister(contest);
-            }}
-            className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 hover:shadow-cyan-500/40 cursor-pointer"
-          >
-            Register Now
-          </button>
-        </div>
-
-      </div>
-    </div>
-  );
-};
-
-// Submit Competition Modal
-const SubmitModal = ({ onClose, onSubmitSuccess }) => {
-  const [formData, setFormData] = useState({
-    title: '',
-    organizer: '',
-    university: 'BUET',
-    type: 'Programming Contest',
-    date: '',
-    location: '',
-    prizePool: '৳50,000',
-    contactEmail: '',
-    link: ''
-  });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    onSubmitSuccess(formData.title || 'New Competition');
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0b111e] border border-slate-700/80 rounded-2xl max-w-xl w-full p-6 max-h-[90vh] overflow-y-auto space-y-5 shadow-2xl relative">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white border border-slate-800 cursor-pointer"
-        >
-          <Icon name="X" className="w-4 h-4" />
-        </button>
-
-        <div>
-          <div className="inline-flex items-center gap-1.5 text-xs font-bold text-cyan-400 uppercase tracking-wider mb-1">
-            <Icon name="PlusCircle" className="w-3.5 h-3.5" />
-            <span>Organizer Portal</span>
-          </div>
-          <h3 className="font-heading font-extrabold text-2xl text-white">
-            List Your Competition
-          </h3>
-          <p className="text-xs text-slate-400 mt-1">
-            Post your university or community contest to reach 10,000+ Bangladeshi CSE students.
-          </p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4 text-xs">
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">Competition Title *</label>
-            <input
-              type="text"
-              required
-              placeholder="e.g. RUET IUPC 2026 / CSE National Hackathon"
-              value={formData.title}
-              onChange={e => setFormData({ ...formData, title: e.target.value })}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Organizer / Club *</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. BUET Computer Club"
-                value={formData.organizer}
-                onChange={e => setFormData({ ...formData, organizer: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">University / Host *</label>
-              <select
-                value={formData.university}
-                onChange={e => setFormData({ ...formData, university: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:outline-none focus:border-cyan-500"
-              >
-                <option value="BUET">BUET</option>
-                <option value="DU">University of Dhaka</option>
-                <option value="KUET">KUET</option>
-                <option value="SUST">SUST</option>
-                <option value="RUET">RUET</option>
-                <option value="CUET">CUET</option>
-                <option value="IUT">IUT</option>
-                <option value="NSU">North South University</option>
-                <option value="BRACU">BRAC University</option>
-                <option value="Other">Other / Tech Community</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Competition Type *</label>
-              <select
-                value={formData.type}
-                onChange={e => setFormData({ ...formData, type: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white focus:outline-none focus:border-cyan-500"
-              >
-                <option value="Programming Contest">Programming Contest (ICPC/IUPC)</option>
-                <option value="Online Contest">Online Speed Contest</option>
-                <option value="Hackathon">Hackathon</option>
-                <option value="AI Challenge">AI / Machine Learning</option>
-                <option value="CTF / Cyber">Cybersecurity CTF</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Date of Contest *</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. October 15, 2026"
-                value={formData.date}
-                onChange={e => setFormData({ ...formData, date: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Location / Venue *</label>
-              <input
-                type="text"
-                required
-                placeholder="e.g. Dhaka (Onsite) or Online"
-                value={formData.location}
-                onChange={e => setFormData({ ...formData, location: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Prize Pool (৳)</label>
-              <input
-                type="text"
-                placeholder="e.g. ৳1,00,000"
-                value={formData.prizePool}
-                onChange={e => setFormData({ ...formData, prizePool: e.target.value })}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">Registration Link or Website</label>
-            <input
-              type="url"
-              placeholder="https://contest.your-university.edu.bd"
-              value={formData.link}
-              onChange={e => setFormData({ ...formData, link: e.target.value })}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          <div className="pt-3 flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-6 py-2.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-bold shadow-lg shadow-cyan-500/25 cursor-pointer"
-            >
-              Submit for Review
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-};
-
-// Auth Modal (Login / Register)
-const AuthModal = ({ mode = 'login', onClose, onAuthSuccess }) => {
-  const [currentMode, setCurrentMode] = useState(mode);
-  const [email, setEmail] = useState('');
-  const [handle, setHandle] = useState('');
-
-  const handleAuth = (e) => {
-    e.preventDefault();
-    onAuthSuccess(currentMode === 'login' ? 'Logged in successfully!' : 'Account registered successfully!');
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-[#0b111e] border border-slate-700/80 rounded-2xl max-w-md w-full p-6 shadow-2xl relative space-y-5">
-        <button
-          onClick={onClose}
-          className="absolute top-4 right-4 p-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white border border-slate-800 cursor-pointer"
-        >
-          <Icon name="X" className="w-4 h-4" />
-        </button>
-
-        <div className="text-center space-y-1">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 mx-auto flex items-center justify-center text-black font-mono-code font-bold mb-2">
-            &lt;/&gt;
-          </div>
-          <h3 className="font-heading font-black text-2xl text-white">
-            {currentMode === 'login' ? 'Welcome Back to CodeBD' : 'Create Student Account'}
-          </h3>
-          <p className="text-xs text-slate-400">
-            {currentMode === 'login' 
-              ? 'Sign in to track bookmark contests and rankings' 
-              : 'Join Bangladesh’s largest competitive coding community'}
-          </p>
-        </div>
-
-        <form onSubmit={handleAuth} className="space-y-3.5 text-xs">
-          {currentMode === 'register' && (
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Full Name</label>
-              <input
-                type="text"
-                required
-                placeholder="Tanvir Ahmed"
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">University / College Email</label>
-            <input
-              type="email"
-              required
-              placeholder="student@buet.ac.bd"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          {currentMode === 'register' && (
-            <div>
-              <label className="block text-slate-300 font-semibold mb-1">Codeforces / VJudge Handle</label>
-              <input
-                type="text"
-                placeholder="e.g. tourist_bd"
-                value={handle}
-                onChange={e => setHandle(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-          )}
-
-          <div>
-            <label className="block text-slate-300 font-semibold mb-1">Password</label>
-            <input
-              type="password"
-              required
-              placeholder="••••••••"
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
-            />
-          </div>
-
-          <button
-            type="submit"
-            className="w-full py-3 rounded-xl bg-gradient-to-r from-cyan-500 via-blue-600 to-indigo-600 text-white font-bold text-xs shadow-lg shadow-cyan-500/25 mt-2 cursor-pointer"
-          >
-            {currentMode === 'login' ? 'Sign In to CodeBD' : 'Register Account'}
-          </button>
-        </form>
-
-        <div className="text-center text-xs text-slate-400 pt-2 border-t border-slate-800">
-          {currentMode === 'login' ? (
-            <span>
-              Don't have an account?{' '}
-              <button
-                onClick={() => setCurrentMode('register')}
-                className="text-cyan-400 font-bold hover:underline cursor-pointer"
-              >
-                Sign up
-              </button>
-            </span>
-          ) : (
-            <span>
-              Already registered?{' '}
-              <button
-                onClick={() => setCurrentMode('login')}
-                className="text-cyan-400 font-bold hover:underline cursor-pointer"
-              >
-                Log in
-              </button>
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// Global Command Palette / Search Modal
-const SearchModal = ({ onClose, onSelectContest, onSelectUni, onSelectCategory }) => {
-  const [query, setQuery] = useState('');
-  const inputRef = useRef(null);
-
-  useEffect(() => {
-    if (inputRef.current) inputRef.current.focus();
-  }, []);
-
-  const results = useMemo(() => {
-    if (!query.trim()) return { contests: window.CODEBD_DATA.upcomingCompetitions, unis: window.CODEBD_DATA.universities.slice(0, 4) };
-    const q = query.toLowerCase();
-    return {
-      contests: window.CODEBD_DATA.upcomingCompetitions.filter(c => 
-        c.title.toLowerCase().includes(q) || c.university.toLowerCase().includes(q) || c.location.toLowerCase().includes(q)
-      ),
-      unis: window.CODEBD_DATA.universities.filter(u => 
-        u.short.toLowerCase().includes(q) || u.fullName.toLowerCase().includes(q) || u.city.toLowerCase().includes(q)
-      ),
-      categories: window.CODEBD_DATA.categories.filter(cat => 
-        cat.name.toLowerCase().includes(q)
-      )
-    };
-  }, [query]);
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center pt-20 p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="bg-[#0c1220] border border-slate-700/80 rounded-2xl max-w-xl w-full shadow-2xl overflow-hidden">
-        
-        <div className="p-4 border-b border-slate-800 flex items-center gap-3">
-          <Icon name="Search" className="w-5 h-5 text-cyan-400 shrink-0" />
-          <input
-            ref={inputRef}
-            type="text"
-            placeholder="Search contests, BUET, ICPC, hackathons..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            className="w-full bg-transparent text-white placeholder-slate-500 text-sm focus:outline-none"
-          />
-          <kbd className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono-code text-slate-400 border border-slate-700">ESC</kbd>
-          <button onClick={onClose} className="text-slate-500 hover:text-white cursor-pointer">✕</button>
-        </div>
-
-        <div className="max-h-96 overflow-y-auto p-4 space-y-4 text-xs">
-          <div>
-            <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
-              Competitions ({results.contests.length})
-            </div>
-            <div className="space-y-1.5">
-              {results.contests.map((c) => (
-                <div
-                  key={c.id}
-                  onClick={() => { onClose(); onSelectContest(c); }}
-                  className="p-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-800 border border-slate-800/80 flex items-center justify-between cursor-pointer group"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <span className="w-8 h-8 rounded-lg bg-cyan-950 text-cyan-400 font-bold text-xs flex items-center justify-center border border-cyan-500/30">
-                      {c.university}
-                    </span>
-                    <div>
-                      <div className="font-bold text-white group-hover:text-cyan-300">{c.title}</div>
-                      <div className="text-[10px] text-slate-400">{c.date} • {c.location}</div>
-                    </div>
-                  </div>
-                  <span className="text-cyan-400 font-mono-code font-bold">{c.prizePool}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {results.unis && results.unis.length > 0 && (
-            <div>
-              <div className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mb-2">
-                Universities ({results.unis.length})
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                {results.unis.map((u) => (
-                  <div
-                    key={u.id}
-                    onClick={() => { onClose(); onSelectUni(u); }}
-                    className="p-2 rounded-xl bg-slate-900/60 hover:bg-slate-800 border border-slate-800/80 flex items-center gap-2 cursor-pointer"
-                  >
-                    <span className="font-bold text-cyan-300">{u.short}</span>
-                    <span className="text-[11px] text-slate-400 truncate">{u.fullName}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-
-      </div>
-    </div>
-  );
-};
-
-// Toast Notification Component
-const Toast = ({ message, onClose }) => {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 3500);
-    return () => clearTimeout(timer);
-  }, [onClose]);
-
-  return (
-    <div className="fixed bottom-6 right-6 z-50 bg-[#0f172a] border border-cyan-500/50 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center gap-3 text-xs animate-in slide-in-from-bottom-5">
-      <div className="w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-        ✓
-      </div>
-      <span className="font-medium">{message}</span>
-      <button onClick={onClose} className="text-slate-400 hover:text-white ml-2 cursor-pointer">✕</button>
-    </div>
-  );
-};
-
-// Main App Root
-const App = () => {
-  const [selectedContest, setSelectedContest] = useState(null);
-  const [submitModalOpen, setSubmitModalOpen] = useState(false);
-  const [authModal, setAuthModal] = useState(null);
-  const [searchModalOpen, setSearchModalOpen] = useState(false);
-  const [toastMessage, setToastMessage] = useState(null);
-  const [bookmarks, setBookmarks] = useState(['buet-iupc-2026']);
-
-  // Global keydown for ⌘K search and Escape
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault();
-        setSearchModalOpen(prev => !prev);
-      }
-      if (e.key === 'Escape') {
-        setSearchModalOpen(false);
-        setSelectedContest(null);
-        setSubmitModalOpen(false);
-        setAuthModal(null);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  const handleBookmarkToggle = (contestId) => {
-    if (bookmarks.includes(contestId)) {
-      setBookmarks(bookmarks.filter(id => id !== contestId));
-      setToastMessage("Removed from bookmarked competitions");
-    } else {
-      setBookmarks([...bookmarks, contestId]);
-      setToastMessage("Competition saved to your bookmarks! 🔖");
-    }
-  };
-
-  const handleNavigateSection = (sectionId) => {
-    const el = document.getElementById(sectionId);
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-[#07090e] text-slate-100 selection:bg-cyan-500 selection:text-black">
-      
-      {/* Sticky Navbar */}
-      <Navbar
-        onOpenAuth={(mode) => setAuthModal(mode)}
-        onOpenSubmit={() => setSubmitModalOpen(true)}
-        onOpenSearch={() => setSearchModalOpen(true)}
-        onNavigateSection={handleNavigateSection}
-      />
-
-      {/* Main Content Area */}
-      <main>
-        {/* Hero Section */}
-        <Hero
-          onExplore={() => handleNavigateSection('competitions')}
-          onSubmitContest={() => setSubmitModalOpen(true)}
-          onSelectContest={(contest) => setSelectedContest(contest)}
-        />
-
-        {/* Quick Statistics */}
-        <QuickStatistics />
-
-        {/* Upcoming Competitions */}
-        <UpcomingCompetitions
-          onSelectContest={(contest) => setSelectedContest(contest)}
-          onBookmarkToggle={handleBookmarkToggle}
-          bookmarks={bookmarks}
-        />
-
-        {/* Featured Competition Banner */}
-        <FeaturedCompetition
-          onRegister={(contest) => {
-            setSelectedContest(contest);
-            setToastMessage("Registration portal opened for BNPC 2026!");
-          }}
-          onSelectContest={(contest) => setSelectedContest(contest)}
-        />
-
-        {/* Browse By Category */}
-        <BrowseByCategory
-          onSelectCategory={(cat) => {
-            handleNavigateSection('competitions');
-            setToastMessage(`Filtering competitions by category: ${cat.name}`);
-          }}
-        />
-
-        {/* Browse By University */}
-        <BrowseByUniversity
-          onSelectUni={(uni) => {
-            handleNavigateSection('competitions');
-            setToastMessage(`Viewing competitions hosted by ${uni.short}`);
-          }}
-        />
-
-        {/* Call To Action for Organizers */}
-        <CtaSection onSubmitContest={() => setSubmitModalOpen(true)} />
-      </main>
-
-      {/* Footer */}
-      <Footer
-        onNavigateSection={handleNavigateSection}
-        onOpenSubmit={() => setSubmitModalOpen(true)}
-        onOpenAuth={(mode) => setAuthModal(mode)}
-        onShowToast={(msg) => setToastMessage(msg)}
-      />
-
-      {/* Interactive Modals */}
-      {selectedContest && (
-        <CompetitionModal
-          contest={selectedContest}
-          onClose={() => setSelectedContest(null)}
-          onRegister={(contest) => {
-            setToastMessage(`Registration form initialized for ${contest.title}!`);
-          }}
-          onBookmarkToggle={handleBookmarkToggle}
-          isBookmarked={bookmarks.includes(selectedContest.id)}
-        />
-      )}
-
-      {submitModalOpen && (
-        <SubmitModal
-          onClose={() => setSubmitModalOpen(false)}
-          onSubmitSuccess={(title) => {
-            setToastMessage(`"${title}" submitted successfully for CodeBD review! 🚀`);
-          }}
-        />
-      )}
-
-      {authModal && (
-        <AuthModal
-          mode={authModal}
-          onClose={() => setAuthModal(null)}
-          onAuthSuccess={(msg) => setToastMessage(msg)}
-        />
-      )}
-
-      {searchModalOpen && (
-        <SearchModal
-          onClose={() => setSearchModalOpen(false)}
-          onSelectContest={(contest) => setSelectedContest(contest)}
-          onSelectUni={(uni) => {
-            handleNavigateSection('competitions');
-            setToastMessage(`Browsing ${uni.short} contests`);
-          }}
-          onSelectCategory={(cat) => {
-            handleNavigateSection('competitions');
-          }}
-        />
-      )}
-
-      {toastMessage && (
-        <Toast message={toastMessage} onClose={() => setToastMessage(null)} />
-      )}
-
-    </div>
-  );
-};
-
-// Render React App to Root
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<App />);
+window.TalentSphereUI = { Icon, Navbar, HeroSection, ExploreCompetitionsSection, ExploreCompetitionsPage, JobFairSection, RankingsSection, Footer };

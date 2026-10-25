@@ -3,19 +3,19 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>CodeBD — Find Every Coding Competition in Bangladesh In One Place</title>
-  <meta name="description" content="CodeBD is Bangladesh's premier centralized hub for discovering CSE coding competitions, ICPC regionals, IUPC tournaments, university hackathons, and programming contests." />
-  <meta name="keywords" content="CodeBD, Bangladesh Coding Competition, BUET IUPC, ICPC Dhaka Regional, DU Hackathon, SUST Programming Contest, KUET CP, Bangladeshi CSE Students" />
-  
-  <!-- Open Graph / Social -->
+  <title>Talent Square — CSE Competitions, Talent, Job Fair & Rankings</title>
+  <meta name="description" content="Explore CSE competitions, connect with participants and recruiters, attend job fairs, and follow talent rankings on Talent Square." />
+  <meta name="keywords" content="Competitions, Hackathons, Competitive Programming, Talent Platform, Job Fair, Tech Rankings, Software Engineering, Developer Recruiting" />
+
+  <!-- Open Graph -->
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="CodeBD — Bangladesh's Competitive Programming Hub" />
-  <meta property="og:description" content="Discover programming contests, hackathons, ICPC events, and CSE challenges happening across Bangladesh." />
-  <meta property="og:site_name" content="CodeBD" />
-  <meta name="theme-color" content="#07090e" />
+  <meta property="og:title" content="Talent Square — CSE Competitions, Talent, Job Fair & Rankings" />
+  <meta property="og:description" content="Explore competitions, submit events, attend job fairs, and view rankings." />
+  <meta property="og:site_name" content="Talent Square" />
+  <meta name="theme-color" content="#060911" />
 
   <!-- Favicon -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🇧🇩</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
 
   <!-- Google Fonts: Plus Jakarta Sans, Outfit, Fira Code -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -31,13 +31,13 @@
         extend: {
           colors: {
             brand: {
-              dark: '#07090e',
-              card: '#0d1322',
+              dark: '#060911',
+              card: '#0b1120',
               cyan: '#06b6d4',
               blue: '#3b82f6',
               purple: '#8b5cf6',
-              bdGreen: '#006a4e',
-              bdRed: '#f42a41',
+              emerald: '#10b981',
+              amber: '#f59e0b'
             }
           },
           fontFamily: {
@@ -53,20 +53,23 @@
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
 
-  <!-- React 18 & ReactDOM & Babel Standalone -->
+  <!-- React 18, ReactDOM, Babel Standalone -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <!-- Custom Stylesheet -->
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="/styles.css?v=20261024-discovery-1" />
 </head>
-<body class="bg-[#07090e] text-slate-100 antialiased selection:bg-cyan-500 selection:text-black">
-  <div id="root"></div>
+<body class="bg-[#060911] text-slate-100 antialiased selection:bg-cyan-500 selection:text-black">
+  <div id="root"><div class="initial-loading" role="status"><span class="loading-ring" aria-hidden="true"></span><p>Getting Talent Square ready…</p></div></div>
+  <noscript><p style="padding:2rem;color:white">Please enable JavaScript to explore Talent Square.</p></noscript>
 
   <!-- Data and Application Script -->
-  <script src="data.js"></script>
-  <script type="text/babel" src="app.js"></script>
+  <script src="/data.js?v=20261024-discovery-1"></script>
+  <script type="text/babel" src="/app.js?v=20261024-discovery-1"></script>
+  <script type="text/babel" src="/workspaces.js?v=20261024-discovery-1"></script>
+  <script type="text/babel" src="/pages.js?v=20261024-discovery-1"></script>
 
   <!-- Initialize Lucide icons helper -->
   <script>
