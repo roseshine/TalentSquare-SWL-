@@ -1,0 +1,21 @@
+{
+  "name": "talentsphere-platform",
+  "version": "1.0.0",
+  "description": "Competition, Talent, Job Fair, and Ranking Platform",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "python-server": "python server.py"
+  },
+  "keywords": [
+    "competition",
+    "hackathon",
+    "job-fair",
+    "ranking",
+    "talent",
+    "recruitment"
+  ],
+  "author": "TalentSphere Team",
+  "license": "MIT"
+}

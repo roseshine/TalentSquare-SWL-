@@ -450,6 +450,10 @@ header button[aria-current="page"] { color: #67e8f9; }
 .auth-page { padding: 112px 0 80px; }
 .auth-layout { display: grid; grid-template-columns: .95fr 1.05fr; align-items: start; gap: 80px; }
 .auth-story { padding-top: 35px; position: sticky; top: 120px; }
+.auth-story.reset-story { position: relative; top: auto; padding: clamp(24px, 3vw, 40px); border-radius: 22px; min-width: 0; }
+.auth-story.reset-story h1 { font-size: clamp(2.25rem, 3.7vw, 3.4rem); line-height: 1.16; letter-spacing: -.025em; margin: 24px 0; overflow-wrap: break-word; }
+.auth-story.reset-story > p { max-width: none; margin: 0; }
+.auth-story.reset-story h1 br { display: block; }
 .auth-story h1 { font: 800 clamp(2.8rem, 4.7vw, 4.3rem)/1.12 'Outfit', sans-serif; letter-spacing: -.04em; margin: 24px 0; }
 .auth-story > p { color: #94a3b8; line-height: 1.9; max-width: 380px; font-size: 14px; }
 .auth-benefits { display: grid; gap: 24px; margin-top: 42px; }
@@ -964,3 +968,30 @@ header button[aria-current="page"] { color: #67e8f9; }
   .workspace-content .content-panel { padding: 20px; }
   .workspace-content .page-form .form-grid { grid-template-columns: 1fr; gap: 0; }
 }
+
+/* Confirmed university announcement details stay inside the review card. */
+.university-review-details { margin-block: 18px; }
+.university-review-details .page-form { margin-top: 16px; }
+.university-review-details input, .university-review-details select { min-width: 0; width: 100%; }
+.university-source-links { display: flex; flex-wrap: wrap; gap: 0 20px; }
+
+/* Account profile details, privacy and normalized photo uploads. */
+.profile-monogram img{width:100%;height:100%;object-fit:cover;border-radius:inherit}
+.profile-image-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:24px}
+.profile-image-editor{padding:18px;border:1px solid var(--border-color,rgba(148,163,184,.18));border-radius:16px;min-width:0}
+.profile-image-editor h3{font-weight:700;margin-bottom:14px}.profile-image-preview{width:112px;height:112px;border-radius:18px;background:rgba(6,182,212,.08);border:1px solid rgba(6,182,212,.25);display:flex;align-items:center;justify-content:center;color:#94a3b8;margin-bottom:16px;overflow:hidden}
+.profile-image-preview img{width:100%;height:100%;object-fit:cover}.profile-image-editor input[type=file]{max-width:100%;color:#94a3b8;margin-top:8px}.profile-image-editor input::file-selector-button{padding:8px 12px;background:#152237;border:1px solid #334155;border-radius:8px;color:#67e8f9;margin-right:10px;cursor:pointer}
+.profile-privacy{margin-block:24px}.profile-privacy .small-note{margin-bottom:14px}.public-profile-page{padding-block:48px;max-width:1100px}.public-profile-page>.content-panel{margin-top:24px}.public-profile-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:20px}.public-profile-fields dt{font-size:12px;color:#94a3b8;margin-bottom:6px}.public-profile-fields dd{white-space:pre-wrap;overflow-wrap:anywhere}.public-company-logo{width:72px;height:72px;object-fit:contain;border-radius:12px;margin-left:auto}
+
+.signup-photo-preview{width:88px;height:88px;object-fit:cover;border-radius:16px;margin-top:12px}.signup-photo input{max-width:100%;margin-top:8px}
+
+.public-profile-page h1{font-size:clamp(1.6rem,3vw,2.3rem);line-height:1.2;font-weight:800}.public-profile-page .profile-preview-card{margin-top:20px}
+
+/* Discovery health and source evidence remain readable on narrow screens. */
+.source-health { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.live-change-summary pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 22rem; overflow: auto; font-size: .75rem; }
+
+/* Account-backed competition activity shares the existing workspace theme. */
+.participant-actions { display: grid; gap: 1rem; }
+.participant-actions form { display: grid; gap: .75rem; }
+.participant-bookmark { min-width: 0; }

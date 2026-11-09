@@ -5,6 +5,7 @@
   const DATA = window.TALENTSPHERE_DATA;
   const AUTH_HOST = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
   const AUTH_API = 'http://' + AUTH_HOST + ':8001/api';
+  let participantSessionRequest = null;
   let csrfToken = '';
   const SUBMIT_PATH = '/workspace?role=organizer&tab=create';
   const sectionPaths = { hero: '/', competitions: '/competitions', jobfairs: '/job-fairs', rankings: '/rankings', workspace: '/workspace',
@@ -43,14 +44,14 @@
         if (!csrfResponse.ok) throw new Error('Could not start a secure connection to the account service.');
         csrfToken = (await csrfResponse.json()).csrfToken;
       }
-      headers['Content-Type'] = 'application/json';
+      if (!(body instanceof FormData)) headers['Content-Type'] = 'application/json';
       headers['X-CSRFToken'] = csrfToken;
     }
     const response = await fetch(AUTH_API + path, {
       method,
       credentials: 'include',
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body)
+      body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body)
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
@@ -59,7 +60,10 @@
       error.data = data;
       throw error;
     }
-    if (path === '/auth/login/' || path === '/auth/logout/') csrfToken = '';
+    if (['/auth/register/', '/auth/login/', '/auth/logout/', '/auth/password/reset/'].includes(path)) {
+      csrfToken = ''; participantSessionRequest = null;
+      window.dispatchEvent(new Event('talent-account-change'));
+    }
     return data;
   }
   function apiFieldErrors(data) {
@@ -71,7 +75,7 @@
     return result;
   }
   function PreviewNotice() {
-    return <p className="preview-notice"><Icon name="info" className="w-4 h-4" />Registration and login use secure Django sessions. Workspace content remains a local preview.</p>;
+    return <p className="preview-notice"><Icon name="info" className="w-4 h-4" />Registration and login use secure Django sessions. Competition and job fair bookmarks and registrations use Django; job applications and rankings remain previews.</p>;
   }
   function Breadcrumb({ parent, label }) {
     return <nav aria-label="Breadcrumb" className="breadcrumb">
@@ -155,7 +159,8 @@
     const [noticeError, setNoticeError] = useState(false);
     const [busy, setBusy] = useState(false);
     const [availability, setAvailability] = useState([]);
-    const [registrationComplete, setRegistrationComplete] = useState(false);
+    const [signupPhoto,setSignupPhoto]=useState(null),[signupPreview,setSignupPreview]=useState('');
+    useEffect(()=>{if(!signupPhoto){setSignupPreview('');return;}const url=URL.createObjectURL(signupPhoto);setSignupPreview(url);return()=>URL.revokeObjectURL(url);},[signupPhoto]);
     const isSignup = mode === 'signup', isForgot = mode === 'forgot-password';
     const next = params.get('next');
     const safeNext = next && (next.startsWith('/competitions/') || next.startsWith('/job-fairs/') || next === SUBMIT_PATH) ? next : null;
@@ -163,9 +168,9 @@
     const description = isSignup ? 'A place for your skills. A path to your next opportunity.' : isForgot ?
       'Enter your account email to start your recovery.' : 'Your next challenge, connection, and breakthrough await.';
     const setRole = (r) => navigate('/signup?role=' + r + (safeNext ? '&next=' + encodeURIComponent(safeNext) : ''));
-    useEffect(() => { setValues({}); setErrors({}); setNotice(''); setNoticeError(false); setRegistrationComplete(false); setAvailability([]); }, [role]);
+    useEffect(() => { setValues({}); setErrors({}); setNotice(''); setNoticeError(false); setAvailability([]); setSignupPhoto(null); }, [role]);
     const field = (name, label, extra = {}) => <Field name={name} label={label} value={values[name] || ''} error={errors[name]}
-      onChange={(e) => { setValues(v => ({ ...v, [name]: e.target.value })); setErrors(x => ({ ...x, [name]: '' })); setNotice(''); setNoticeError(false); setRegistrationComplete(false); }} {...extra} />;
+      onChange={(e) => { setValues(v => ({ ...v, [name]: e.target.value })); setErrors(x => ({ ...x, [name]: '' })); setNotice(''); setNoticeError(false); }} {...extra} />;
     async function submit(e) {
       e.preventDefault();
       const form = e.currentTarget;
@@ -188,7 +193,8 @@
       setNoticeError(false);
       try {
         if (isForgot) {
-          setNotice('Password recovery is not connected yet. Contact Talent Square support if you cannot access your account.');
+          const result = await requestApi('/auth/password/forgot/', {method:'POST', body:{email:values.email}});
+          setNotice(result.detail + (result.delivery_mode === 'local' ? ' Local development mode: messages are saved in the project’s private backend/.runtime/emails folder; nothing is sent to your email inbox.' : ' Check your inbox and spam folder.'));
           return;
         }
         if (isSignup) {
@@ -228,9 +234,11 @@
             recruiter_designation: values.recruiter_designation || ''
           });
           const result = await requestApi('/auth/register/', { method: 'POST', body: payload });
-          setNotice(result.detail || 'Your account was created. You can log in now.');
-          setValues(v => ({ ...v, password: '', confirm_password: '' }));
-          setRegistrationComplete(true);
+          if(signupPhoto){
+            try{const imageForm=new FormData();imageForm.append('image',signupPhoto);await requestApi('/auth/profile/images/photo/',{method:'POST',body:imageForm});}
+            catch{navigate('/workspace?role='+encodeURIComponent(result.role)+'&tab=profile&photo=retry');return;}
+          }
+          navigate('/workspace?role=' + encodeURIComponent(result.role));
         } else {
           const result = await requestApi('/auth/login/', {
             method: 'POST', body: { email: values.email, password: values.password }
@@ -320,9 +328,10 @@
               {field('company_description', 'Company description (optional)', { type: 'textarea', required: false, placeholder: 'Tell participants about your team and opportunities.' })}
               {field('recruiter_designation', 'Recruiter designation (optional)', { required: false, placeholder: 'For example, Talent Partner' })}
             </>}
+            {isSignup&&role&&<div className="signup-photo"><label className="work-label">{role==='organizer'?'Organization logo (optional)':'Profile photo (optional)'}<input name="signup_photo" type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e=>{const file=e.target.files?.[0];if(file&&file.size>5*1024*1024){setSignupPhoto(null);setNotice('Choose an image smaller than 5 MB, or add one later in your profile.');setNoticeError(true);}else{setSignupPhoto(file||null);setNotice('');}}}/></label><p className="small-note">JPEG, PNG or WebP, up to 5 MB. You can add or change this later. Your profile starts private.</p>{signupPreview&&<img className="signup-photo-preview" src={signupPreview} alt="Selected profile image preview"/>}</div>}
             {!isSignup && !isForgot && <div className="form-links"><span>Good to see you again.</span><Link to={'/login?view=recovery' + (safeNext ? '&next=' + encodeURIComponent(safeNext) : '')}>Forgot password?</Link></div>}
-            {notice && <Notice error={noticeError}>{notice}{registrationComplete && <Link className="inline-link" to="/login">Continue to login <Icon name="arrowright" className="w-4 h-4" /></Link>}{safeNext && !noticeError && <Link className="inline-link" to={safeNext}>Return to your event <Icon name="arrowright" className="w-4 h-4" /></Link>}</Notice>}
-            <button className="button-primary full-width" disabled={busy} type="submit">{busy ? 'Please wait…' : isForgot ? 'Check recovery options' : isSignup ? 'Create account' : 'Login'}<Icon name="arrowright" className="w-4 h-4" /></button>
+            {notice && <Notice error={noticeError}>{notice}{safeNext && !noticeError && <Link className="inline-link" to={safeNext}>Return to your event <Icon name="arrowright" className="w-4 h-4" /></Link>}</Notice>}
+            <button className="button-primary full-width" disabled={busy} type="submit">{busy ? 'Please wait…' : isForgot ? 'Request reset link' : isSignup ? 'Create account' : 'Login'}<Icon name="arrowright" className="w-4 h-4" /></button>
           </form>}
           {isSignup && !role && <p className="role-prompt">Choose a role above to personalize your registration.</p>}
           <p className="auth-switch">{isSignup ? 'Already part of the community? ' : isForgot ? 'Remember your password? ' : 'New to Talent Square? '}
@@ -331,6 +340,47 @@
           <Link className="inline-link" to={'/workspace?role=' + (role || 'participant')}>Explore the workspace preview <Icon name="arrowright" className="w-4 h-4" /></Link>
         </section>
       </div>
+    </div></div>;
+  }
+
+  function ResetPasswordPage({search}) {
+    const params = new URLSearchParams(search), uid = params.get('uid'), token = params.get('token');
+    const [values,setValues] = useState({new_password:'',confirm_password:''});
+    const [errors,setErrors] = useState({}), [notice,setNotice] = useState('');
+    const [busy,setBusy] = useState(false), [complete,setComplete] = useState(false);
+    async function submit(event) {
+      event.preventDefault();
+      const invalid = formErrors(event.currentTarget);
+      if(values.new_password !== values.confirm_password)invalid.confirm_password='Passwords do not match.';
+      if(Object.keys(invalid).length){setErrors(invalid);focusError(event.currentTarget,invalid);return;}
+      setBusy(true);setNotice('');setErrors({});
+      try {
+        await requestApi('/auth/password/reset/',{method:'POST',body:{uid,token,...values}});
+        setValues({new_password:'',confirm_password:''});setComplete(true);
+        window.history.replaceState({},'', '/login?view=reset');
+      } catch(error) {
+        setErrors(apiFieldErrors(error.data));
+        setNotice(error.data ? error.message : 'Could not connect to the account service. Please try again.');
+      } finally {setBusy(false);}
+    }
+    return <div className="auth-page bg-radial-gradient"><div className="page-container">
+      <Breadcrumb label="Reset password"/>
+      <div className="auth-layout"><aside className="auth-story reset-story glass-panel">
+        <span className="eyebrow"><Icon name="shieldcheck" className="w-4 h-4"/>YOUR ACCOUNT, PROTECTED</span>
+        <h1>A fresh start.<br/><span className="gradient-text-hero">Back to your sphere.</span></h1>
+        <p>Choose a strong password you haven’t used elsewhere. Your account and saved profile stay in place.</p>
+      </aside><section className="auth-card glass-modal">
+        <div className="form-icon"><Icon name="shieldcheck" className="w-6 h-6"/></div>
+        <h2>{complete?'Password updated':'Choose a new password'}</h2>
+        {complete?<><Notice>Your password was updated. Sign in with your registered email and new password.</Notice><Link className="button-primary full-width" to="/login">Go to login</Link></>:
+          !uid||!token?<><Notice error>This reset link is incomplete. Request a new one.</Notice><Link className="button-primary full-width" to="/login?view=recovery">Request a reset link</Link></>:
+          <><p className="form-description">Reset links expire after one hour and can only be used once.</p>
+          <form className="page-form" noValidate onSubmit={submit}>
+            {['new_password','confirm_password'].map(name=><Field key={name} name={name} type="password" label={name==='new_password'?'New password':'Confirm new password'} autoComplete="new-password" value={values[name]} error={errors[name]} hint={name==='new_password'?'Use at least 8 characters. Avoid common passwords or personal details.':undefined} onChange={event=>{setValues(v=>({...v,[name]:event.target.value}));setErrors(e=>({...e,[name]:''}));}}/>)}
+            {notice&&<Notice error>{notice}</Notice>}
+            <button className="button-primary full-width" type="submit" disabled={busy}>{busy?'Updating password…':'Save new password'}</button>
+          </form><Link className="inline-link" to="/login?view=recovery">Request a new reset link</Link></>}
+      </section></div>
     </div></div>;
   }
 
@@ -344,6 +394,72 @@
         setSaved(!saved); setError(''); } catch { setError('Your browser could not save this event.'); }
     }
     return <><button className="button-secondary full-width" onClick={toggle} aria-pressed={saved}><Icon name={saved ? 'checkcircle2' : 'sparkles'} className="w-4 h-4" />{saved ? 'Saved on this device' : label}</button>{error && <p role="alert" className="field-error">{error}</p>}</>;
+  }
+
+  function useParticipantSession() {
+    const [state,setState]=useState({status:'loading',account:null});
+    useEffect(()=>{
+      let active=true;
+      const load=()=>{
+        if(!participantSessionRequest)participantSessionRequest=requestApi('/auth/me/').catch(error=>{if(error.status===401)return null;throw error;});
+        participantSessionRequest.then(account=>{if(active)setState({status:account?'ready':'signed-out',account});}).catch(()=>{if(active)setState({status:'error',account:null});});
+      };
+      load();window.addEventListener('talent-account-change',load);
+      return()=>{active=false;window.removeEventListener('talent-account-change',load);};
+    },[]);
+    return state;
+  }
+
+  function useCompetitionActivity(id, session) {
+    const [state,setState]=useState({status:'loading'}),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+    async function reload(){const data=await requestApi(`/participant/competitions/${id}/activity/`);setState({status:'ready',...data});}
+    useEffect(()=>{
+      let active=true;
+      if(session.account?.role!=='participant'){setState({status:session.status});return()=>{active=false;};}
+      setState({status:'loading'});
+      requestApi(`/participant/competitions/${id}/activity/`).then(data=>{if(active)setState({status:'ready',...data});}).catch(error=>{if(active)setState({status:'error',error:error.message});});
+      return()=>{active=false;};
+    },[id,session.status,session.account?.id]);
+    async function mutate(path,method,body={},success='Saved to your account.'){
+      if(busy)return;
+      setBusy(true);setMessage('');
+      try{await requestApi(path,{method,body});await reload();setMessage(success);}
+      catch(error){setMessage(error.message);}
+      finally{setBusy(false);}
+    }
+    return {state,busy,message,mutate};
+  }
+
+  function ParticipantBookmarkButton({id,title='competition',compact=false}) {
+    const session=useParticipantSession(),activity=useCompetitionActivity(id,session);
+    if(session.status==='loading')return <span className="small-note">Checking account…</span>;
+    if(session.status==='error')return <span role="alert" className="small-note">Account service unavailable.</span>;
+    if(session.status==='signed-out')return <Link className="button-secondary" to={'/login?next='+encodeURIComponent('/competitions/'+id)}>Sign in to save</Link>;
+    if(session.account?.role!=='participant')return null;
+    const {state,busy,message,mutate}=activity;
+    if(state.status==='error')return <span role="alert" className="small-note">{state.error}</span>;
+    return <div className="participant-bookmark"><button className={compact?'competition-save-button':'button-secondary full-width'} disabled={busy||state.status!=='ready'} aria-label={(state.bookmarked?'Remove bookmark for ':'Bookmark ')+title} aria-pressed={!!state.bookmarked} onClick={()=>mutate(`/participant/competitions/${id}/bookmark/`,state.bookmarked?'DELETE':'POST',{},state.bookmarked?'Bookmark removed.':'Bookmarked in your account.')}>
+      {busy?'Saving…':state.bookmarked?'Bookmarked':compact?'Save':'Bookmark competition'}</button>{message&&<p role="status" className="small-note">{message}</p>}</div>;
+  }
+
+  function ParticipantCompetitionActions({competition:c}) {
+    const session=useParticipantSession(),{state,busy,message,mutate}=useCompetitionActivity(c.id,session);
+    const [report,setReport]=useState('interested');
+    useEffect(()=>setReport(state.participation?.reported_status||'interested'),[state.participation?.reported_status]);
+    const internal=c.registrationMode==='internal',registration=state.registration;
+    return <div className="participant-actions">
+      {!internal&&(c.registrationUrl?<a className="button-primary full-width" data-official-registration href={c.registrationUrl} target="_blank" rel="noopener noreferrer">{c.submissionSource==='imported'?'Visit official event website':'Register on Official Website'}</a>:<p className="small-note">No confirmed registration link is provided. Read the original announcement.</p>)}
+      {!internal&&<p className="small-note">Opening this link does not register you on Talent Square or confirm an external registration.</p>}
+      {session.status==='loading'?<p role="status">Checking participant account…</p>:session.status==='error'?<Notice error>Account service unavailable. Reload to try again.</Notice>:session.status==='signed-out'?<Link className="button-secondary" to={'/login?next='+encodeURIComponent('/competitions/'+c.id)}>Sign in to {internal?'register or save':'save or track'}</Link>:session.account?.role==='participant'?<>
+        <ParticipantBookmarkButton id={c.id} title={c.title}/>
+        {state.status==='loading'&&<p role="status">Loading your activity…</p>}
+        {state.status==='error'&&<Notice error>{state.error}</Notice>}
+        {internal&&<p className="small-note">Your name and registration status are shared with the organizer. No payment is collected here.</p>}
+        {internal&&state.status==='ready'&&(registration?<><p className="registration-status" role="status">{registration.status_label}</p>{registration.registration_status==='active'&&new Date(c.targetDate)>new Date()&&<button className="button-secondary" disabled={busy} onClick={()=>{if(window.confirm('Withdraw this registration? It cannot be reopened.'))mutate(`/participant/registrations/${registration.id}/`,'DELETE',{},'Registration withdrawn. History retained.');}}>Withdraw registration</button>}</>:<><button className="button-primary full-width" disabled={busy||!state.registration_available} onClick={()=>mutate(`/participant/competitions/${c.id}/register/`,'POST',{},'Registered on Talent Square.')}>{busy?'Registering…':'Register on Talent Square'}</button>{!state.registration_available&&<p className="small-note">Registration is closed or its approved configuration is incomplete.</p>}</>)}
+        {!internal&&state.status==='ready'&&<form onSubmit={event=>{event.preventDefault();mutate(`/participant/competitions/${c.id}/participation/`,'PUT',{reported_status:report},'Self-reported status saved.');}}><label className="work-label">Your external activity<select className="form-input" aria-label="Your external activity" value={report} disabled={busy} onChange={event=>setReport(event.target.value)}>{[['interested','Interested'],['planning','Planning to Register'],['registered_external','Registered Externally — Self-Reported'],['participated','Participated — Self-Reported'],['completed','Completed — Self-Reported']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></label><p className="small-note">Self-reported — not verified by Talent Square.</p>{state.participation&&<p role="status">{state.participation.status_label}</p>}<button className="button-secondary" disabled={busy} type="submit">{busy?'Saving…':'Save self-reported status'}</button></form>}
+        {message&&<p role="status" className="small-note">{message}</p>}
+      </>:<p className="small-note">Bookmarks and participation actions require a Participant account.</p>}
+    </div>;
   }
   function CompetitionDetails({ competition: initialCompetition, competitionId }) {
     const [tab, setTab] = useState('Overview');
@@ -382,7 +498,7 @@
       </PageHeader>
       <div className="page-container detail-layout">
         <div className="detail-main">
-          <p className="preview-notice"><Icon name="shieldcheck" className="w-4 h-4" />{c.submissionSource === 'imported' ? 'This listing was imported from an official source; import is not an endorsement. Confirm participation rules on the original site.' : "This competition was approved for publication. Confirm the organizer's official instructions before registering."}</p>
+          <p className="preview-notice"><Icon name="shieldcheck" className="w-4 h-4" />{c.submissionSource === 'imported' ? 'This listing was imported from an external source; import is not an endorsement. Confirm participation rules on the original site.' : "This competition was approved for publication. Confirm the organizer's official instructions before registering."}</p>
           <div className="detail-stats"><InfoRow icon="trophy" label="Prize pool" value={display(c.prizePool)} /><InfoRow icon="users" label="Team size" value={display(c.teamSize)} /><InfoRow icon="mappin" label="Format" value={display(c.mode)} /></div>
           <div className="page-tabs" role="tablist" aria-label="Competition information">{['Overview', 'Schedule', 'Guidelines'].map(t =>
             <button role="tab" id={'contest-tab-' + t} aria-controls="contest-tab-content" aria-selected={tab === t} key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}
@@ -403,9 +519,8 @@
         <aside className="detail-sidebar"><div className="registration-card">
           <span className="eyebrow">PUBLISHED COMPETITION</span><h2>Competition<br /><span className="gradient-text-hero">information</span></h2>
           <InfoRow icon="calendar" label="Competition date" value={c.date || detailDate(c.targetDate)} /><InfoRow icon="clock" label="Registration deadline" value={detailDate(c.deadline)} />
-          {c.registrationUrl ? <a className="button-primary full-width" href={c.registrationUrl} target="_blank" rel="noopener noreferrer">Register Now<Icon name="arrowright" className="w-4 h-4" /></a> : <button className="button-secondary full-width" type="button" disabled>Registration link not provided</button>}
-          <SaveButton id={c.id} /><p className="small-note">Registration takes place on the external website linked above.</p>
-          {c.submissionSource === 'imported' && <div className="soft-box"><strong>Imported from {c.sourceName || 'an external source'}</strong><p className="small-note">Last checked: {c.sourceCheckedAt ? new Date(c.sourceCheckedAt).toLocaleString() : 'Not provided'}. Fields missing from the source remain unknown.</p></div>}
+          <ParticipantCompetitionActions competition={c}/>
+          {c.submissionSource === 'imported' && <div className="soft-box"><strong>Imported from {c.sourceName || 'an external source'}</strong><p className="small-note">Last checked: {c.sourceCheckedAt ? new Date(c.sourceCheckedAt).toLocaleString() : 'Not provided'}. Fields missing from the source remain unknown.</p>{c.sourceFreshness?.map(label=><p className="small-note" key={label}>{label}</p>)}</div>}
           {c.sourceUrl ? <a className="inline-link" href={c.sourceUrl} target="_blank" rel="noopener noreferrer">View Original Announcement<Icon name="arrowright" className="w-4 h-4" /></a> : <p className="small-note">Original announcement link not provided.</p>}
           {c.organizerProfileUrl && <a className="inline-link" href={c.organizerProfileUrl} target="_blank" rel="noopener noreferrer">View Organizer Profile<Icon name="arrowright" className="w-4 h-4" /></a>}
           <Link className="inline-link" to={'/help?topic=listing&url=' + encodeURIComponent(window.location.origin + '/competitions/' + c.id)}>Report a listing issue →</Link>
@@ -413,43 +528,8 @@
       </div>
     </>;
   }
-  function JobFairsPage({ onOpenAuth, onSelectFair }) {
-    const [query, setQuery] = useState(''), [mode, setMode] = useState('all');
-    const items = DATA.jobFairs.filter(f => {
-      const q = query.trim().toLowerCase();
-      return (!q || [f.title, f.organizer, ...f.tracks, ...f.participatingCompanies.map(c => c.name)].join(' ').toLowerCase().includes(q)) &&
-        (mode === 'all' || (mode === 'hybrid' ? f.mode.toLowerCase().includes('hybrid') : f.mode.toLowerCase().includes('virtual')));
-    });
-    return <><PageHeader title="Great talent." accent="Real connections." eyebrow="THE NEXT STEP IN YOUR CAREER" description="Find your people. Meet hiring teams. Discover opportunities that move you forward." icon="briefcase" />
-      <div className="page-container listing-toolbar"><div className="search-box"><Icon name="search" className="w-5 h-5" /><input aria-label="Search job fairs" placeholder="Search events, companies, or career tracks…" value={query} onChange={e => setQuery(e.target.value)} /></div>
-        <select aria-label="Fair format" className="form-input" value={mode} onChange={e => setMode(e.target.value)}><option value="all">All formats</option><option value="virtual">Virtual</option><option value="hybrid">Hybrid</option></select>
-        <span aria-live="polite">{items.length} events</span></div>
-      {items.length ? <JobFairSection items={items} onOpenAuth={onOpenAuth} onSelectFair={onSelectFair} /> :
-        <div className="page-container"><EmptyState title="No fairs found" text="Try a different company, career track, or event format." onReset={() => { setQuery(''); setMode('all'); }} /></div>}
-    </>;
-  }
-  function JobFairDetails({ fair: f }) {
-    if (!f) return <NotFound />;
-    return <><PageHeader eyebrow={f.badge} title={f.title} description={f.organizer} icon="briefcase" parent={{ to: '/job-fairs', label: 'Job fairs' }}>
-      <div className="detail-emblem purple-emblem"><Icon name="building2" className="w-16 h-16" /></div></PageHeader>
-      <div className="page-container detail-layout"><div className="detail-main">
-        <div className="detail-stats"><InfoRow icon="building2" label="Hiring community" value={f.companiesCount} /><InfoRow icon="briefcase" label="Opportunities" value={f.openPositions} /><InfoRow icon="users" label="Connections" value={f.attendeesCount} /></div>
-        <Panel title="Your next opportunity starts with a conversation" icon="sparkles"><p>{f.description}</p></Panel>
-        <Panel title="Meet the participating companies" icon="building2"><p className="section-intro">Explore the teams and roles featured in this sample event.</p><div className="company-grid">
-          {f.participatingCompanies.map(c => <article className="company-card" key={c.name}><span className="company-logo">{c.logo}</span><div><h3>{c.name}</h3><p>{c.roles}</p></div></article>)}
-        </div></Panel>
-        <Panel title="Find your career track" icon="briefcase"><div className="tag-list">{f.tracks.map(t => <span key={t}>{t}</span>)}</div></Panel>
-        <Panel title="Come prepared" icon="checkcircle2"><ol className="timeline"><li><span>01</span><div><h3>Build your introduction</h3><p>Bring your portfolio, updated résumé, and a short introduction.</p></div></li>
-          <li><span>02</span><div><h3>Explore the companies</h3><p>Choose the teams and roles that align with your interests.</p></div></li>
-          <li><span>03</span><div><h3>Make a connection</h3><p>The organizer will share the final agenda and joining instructions.</p></div></li></ol></Panel>
-        <Link className="inline-link" to="/job-fairs"><Icon name="arrowleft" className="w-4 h-4" />All job fairs</Link>
-      </div><aside className="detail-sidebar"><div className="registration-card purple-card"><span className="eyebrow">OPEN A NEW DOOR</span><h2>Your talent.<br /><span className="gradient-text-purple">Their next hire.</span></h2>
-        <InfoRow icon="calendar" label="When" value={f.dates} /><InfoRow icon="mappin" label="Where" value={f.mode} />
-        <Link className="button-primary full-width" to={'/signup?role=participant&next=' + encodeURIComponent('/job-fairs/' + f.id)}>Get started<Icon name="arrowright" className="w-4 h-4" /></Link>
-        <SaveButton id={f.id} /><p className="small-note">Sample event. Attendance and interviews are not booked in this preview.</p>
-      </div><Link className="sidebar-tip" to="/signup?role=recruiter"><Icon name="building2" className="w-5 h-5" /><p>Looking for your next hire?<br /><strong>Join as a recruiter →</strong></p></Link></aside></div>
-    </>;
-  }
+  function JobFairsPage() { return <FairUI.Directory/>; }
+  function JobFairDetails({id}) { return <FairUI.Detail id={id}/>; }
   const DRAFT_KEY = 'talentsphere-competition-draft';
   function SubmitCompetitionPage({ embedded = false }) {
     const [values, setValues] = useState(() => {
@@ -527,12 +607,12 @@
     { group: 'Competitions', question: 'How do I join a competition?', answer: 'Open Explore competitions, use search or a category filter, then read the event details. Check eligibility, team size, dates, and the original organizer instructions. The current Join action opens a signup preview; it does not register you for an event.' },
     { group: 'Competitions', question: 'How do I submit my own competition?', answer: 'Sign in with an Organizer account, open My Competitions, then choose Create competition. You can save a draft or submit complete event details for administrator review. Pending and rejected submissions remain private; only a published listing appears in Explore. University and outside-university hosts are supported.' },
     { group: 'Competitions', question: 'What should I do if a deadline or event detail is incorrect?', answer: 'Check the original announcement first. Use the Competition correction topic below to prepare a report with the listing link, the incorrect detail, and the corrected information. Support delivery is not enabled in this preview.' },
-    { group: 'Imports', question: 'Are competitions being imported automatically?', answer: 'The live importer checks upcoming contests from the official Codeforces API. An enabled source can publish new contests automatically or hold them for staff review. Source changes are reviewed before public updates. Admin Live imports shows real runs and candidates; older Simulate check controls remain demonstrations. Facebook and additional university sources are not connected.' },
-    { group: 'Imports', question: 'Will an imported competition be verified automatically?', answer: 'An imported listing is not a verified endorsement. The Codeforces adapter checks required source fields and duplicate event links; unavailable deadlines, eligibility, prizes, and fees stay unknown. Trusted-source auto-publication can be enabled by staff with competition-review permissions. Always confirm registration instructions with the organizer.' },
+    { group: 'Imports', question: 'Are competitions being imported automatically?', answer: 'The live importer checks the official Codeforces API, AtCoder upcoming and daily contest schedule, and Major League Hacking student hackathon schedule. New AtCoder and MLH sources use staff review by default. Enabled sources refresh on their configured intervals while the backend worker runs. Source changes require review before public updates. Admin Live imports shows real runs and candidates; older Simulate check controls remain demonstrations. Selected Bangladesh university sources (BUET CSE, UIU, NSU ECE and DIU) are checked every six hours while the worker runs. University announcements require confirmed details and staff approval; publication dates are never treated as event dates. This does not cover every university or Facebook-only announcement. Facebook is not connected.' },
+    { group: 'Imports', question: 'Will an imported competition be verified automatically?', answer: 'An imported listing is not a verified endorsement. The connectors check required source fields and duplicate event links; unavailable deadlines, eligibility, prizes, and fees stay unknown. MLH is a listing source, and host or university affiliation remains unknown unless established separately. Trusted-source auto-publication can be enabled by staff with competition-review permissions. Always confirm registration instructions with the organizer.' },
     { group: 'Accounts', question: 'Why can I choose different workspace roles?', answer: 'The role selector changes the workspace view but does not change your Django account role or grant access to protected backend operations. Competition submission requires an authenticated Organizer account. Django Admin is separate and requires an administrator account.' },
-    { group: 'Accounts', question: 'Can I create an account or reset my password now?', answer: 'Registration and email/password login use the local Django backend. Password recovery is not connected yet. Registration profiles are private by default, and login uses a Django session cookie rather than localStorage.' },
+    { group: 'Accounts', question: 'Can I create an account or reset my password now?', answer: 'Registration and email/password login use the local Django backend. Password recovery supports expiring reset links. This local setup saves messages in a private email outbox; inbox delivery needs an SMTP provider. Registration profiles are private by default, and login uses a Django session cookie rather than localStorage.' },
     { group: 'Accounts', question: 'Where are my drafts, profile changes, and saved events?', answer: 'Your saved account profile is read from Django and is currently read-only in the workspace. Organizer competition drafts and submissions are saved to Django and linked to your account. Older browser-only competition drafts may remain in local storage; other sample profile edits, preferences, and saved events stay in this browser and do not update your account or follow you to another device.' },
-    { group: 'Careers', question: 'Does signing up book an interview or apply for a job?', answer: 'No. Job fairs, opportunities, applications, and hiring decisions are sample frontend workflows. They do not send applications, reserve attendance, book interviews, or contact employers.' },
+    { group: 'Careers', question: 'Does signing up book an interview or apply for a job?', answer: 'No. Published job fairs support saved items and internal attendance registration through Django, or links to official external registration. A registration records interest or planned attendance, not verified attendance, an interview or a job application. Job applications, recruitment and hiring remain previews.' },
     { group: 'Careers', question: 'How are rankings calculated?', answer: 'The current leaderboard uses sample data. Organizer results and admin result review can be explored locally, but they do not change public ranking points. A published scoring policy and verified results are needed before live rankings.' }
   ];
   function HelpPage({ search }) {
@@ -584,12 +664,12 @@
       description: 'What the local Talent Square frontend and account backend store, and what stays on your device.',
       intro: 'This notice describes the local frontend and Django account backend. The service operator, hosting arrangements, retention periods, and account deletion process must be documented before a public launch.',
       sections: [
-        { id:'preview', title:'The current service and preview', paragraphs:['Competition discovery and organizer competition submissions use the local Django backend. Authenticated Organizers can save drafts or submit listings for administrator review; only published listings appear in public Explore. Registration for events, job fairs, rankings, applications, hiring, and the frontend admin workspace remain demonstrations.'] },
-        { id:'storage', title:'Information stored in your browser', paragraphs:['Workspace sample activity, preview profile edits, preferences, saved events, and simulated import history are stored using this site’s localStorage. These preview copies remain in the browser where you make the changes; they are not synchronized with a Talent Square account or another device. Signed-in account profile details are read from the local Django backend and are not overridden by preview profile data. Account profile editing is not connected yet.','The current browser storage keys include talentsphere-saved and talentsphere-workspaces-v1. An older talentsphere-competition-draft key may remain in a browser profile, but Django-backed organizer submissions do not read it. Data can remain until you remove it or clear the site’s browser storage. Anyone using the same browser profile may be able to view local preview content.'] },
-        { id:'forms', title:'Forms and passwords', paragraphs:['Registration and login send account details to the local Django API on port 8001. Django stores passwords as hashes and uses an HTTP-only session cookie for login; the frontend does not save passwords or authentication state in localStorage. Role-specific profile fields are saved in SQLite and are private by default. Password recovery is not connected yet.','This configuration is for local development. A public deployment needs HTTPS, a private production secret key, secure cookies, and deployment security settings. The Help & Contact form keeps its draft in page memory and can create a text file when you choose Download; it does not send a support message.'] },
+        { id:'preview', title:'The current service and preview', paragraphs:['Competition discovery and organizer competition submissions use the local Django backend. Authenticated Organizers can save drafts or submit listings for administrator review; only published listings appear in public Explore. Internal registration, bookmarks and Participant activity use Django. External registrations are self-reported and unverified; job fairs, rankings, applications, hiring and older admin tabs remain demonstrations.'] },
+        { id:'storage', title:'Information stored in your browser', paragraphs:['Workspace sample activity, preview profile edits, preferences, saved events, and simulated import history are stored using this site’s localStorage. These preview copies remain in the browser where you make the changes; they are not synchronized with a Talent Square account or another device. Signed-in account profile details are read from the local Django backend and are not overridden by preview profile data. Profile details and optional photos can be edited in My workspace. Profiles stay private unless the owner makes them public; email and phone sharing require separate choices.','The current browser storage keys include talentsphere-saved and talentsphere-workspaces-v1. An older talentsphere-competition-draft key may remain in a browser profile, but Django-backed organizer submissions do not read it. Data can remain until you remove it or clear the site’s browser storage. Anyone using the same browser profile may be able to view local preview content.'] },
+        { id:'forms', title:'Forms and passwords', paragraphs:['Registration and login send account details to the local Django API on port 8001. Django stores passwords as hashes and uses an HTTP-only session cookie for login; the frontend does not save passwords or authentication state in localStorage. Role-specific profile fields are saved in SQLite and are private by default. Password recovery supports expiring reset links. This local setup saves messages in a private email outbox; inbox delivery needs an SMTP provider.','This configuration is for local development. A public deployment needs HTTPS, a private production secret key, secure cookies, and deployment security settings. The Help & Contact form keeps its draft in page memory and can create a text file when you choose Download; it does not send a support message.'] },
         { id:'third-parties', title:'Third-party resources and external links', paragraphs:['This preview loads React, Babel, Tailwind, icons, and fonts from third-party content delivery services, including unpkg.com, cdn.tailwindcss.com, and Google Fonts. Loading those resources sends ordinary web requests to those providers, which may receive technical information such as your IP address and browser details.','Opening an external organizer, registration, company, or source link takes you to another service. That service’s own privacy practices apply there. Review the destination before providing personal information.'] },
         { id:'visibility', title:'Profiles and sample visibility controls', paragraphs:['Registration profiles are stored in SQLite and are private by default. A signed-in member can view their own saved profile in the workspace; profile editing and public profile browsing are not connected. The preview profile editor changes only local sample data, and its visibility control does not publish the registered profile.'] },
-        { id:'imports', title:'Imported competition information', paragraphs:['The Live imports tools store approved-source configurations, import candidates, review decisions, and run history in the Django database. The first live connector reads upcoming contests from the public official Codeforces API. It retains source links and last-check times. Older preview controls are still local demonstrations.','Future collection should use approved sources and retain the announcement’s origin. Source authorization, the information collected, correction requests, and any retention rules must be documented before a live importer is enabled.'] },
+        { id:'imports', title:'Imported competition information', paragraphs:['The Live imports tools store approved-source configurations, import candidates, review decisions, and run history in the Django database. Live connectors read the official Codeforces API, AtCoder contest schedule, Major League Hacking season schedule, and configured official pages from BUET CSE, UIU, NSU ECE and DIU. They retain event metadata and original links, without copying full announcements or fetching organizer websites. It retains source links and last-check times. Older preview controls are still local demonstrations.','Future collection should use approved sources and retain the announcement’s origin. Source authorization, the information collected, correction requests, and any retention rules must be documented before a live importer is enabled.'] },
         { id:'choices', title:'Your choices and local data removal', paragraphs:['You can edit preview profiles, update preferences, remove saved events, and replace a competition draft through the workspace controls. To remove local preview data, clear this site’s storage using your browser’s site-data settings. Account deletion is not available in the local account API yet.','Clearing browser storage removes local drafts and preview changes. It does not delete a Django account from SQLite; an administrator can manage local accounts through Django Admin.'] },
         { id:'questions', title:'Questions, corrections, and future updates', paragraphs:['Use Help & Contact to prepare a privacy question or a correction request. Delivery is not connected in this preview, so preparing or downloading a message is not a submitted request.','This notice should be updated as the implementation changes. The current preview does not define the operator, jurisdiction-specific rights process, or live account-deletion workflow. Those details belong in the launch version.'] }
       ]
@@ -599,11 +679,11 @@
       description: 'A clear starting point for participants, organizers, recruiters, and the people behind the platform.',
       intro: 'These are draft terms for the local frontend and account backend. Service-operator details, applicable law, hosting, retention, and working contact procedures must be finalized before a public launch.',
       sections: [
-        { id:'scope', title:'What Talent Square currently provides', paragraphs:['The current experience supports local account registration and email/password login. Competition discovery reads published records from Django. Organizers can save competition drafts or submit complete listings for administrator review; only published records are public. Job fairs, rankings, most member workspace activity, and job applications remain previews. A preview action does not register an attendee, book an interview, or send a job application.'] },
+        { id:'scope', title:'What Talent Square currently provides', paragraphs:['Accounts, competition discovery and participation use Django. Organizers can submit competitions and job fairs for staff review; only published records are public. Participants can save published job fairs and register interest or attendance internally where available. External links do not confirm registration. Attendance registration is not verified attendance, an interview or a job application. Rankings, recruitment and job applications remain previews.'] },
         { id:'participation', title:'Participating responsibly', paragraphs:['Use accurate information when trying the forms. Do not use the platform to impersonate another person or organization, distribute harmful content, mislead participants, or present someone else’s work as your own.','For a real competition, check the organizer’s eligibility, deadlines, team rules, submission instructions, and terms before participating. Public listings contain organizer-provided event details approved for publication; check the original announcement for current rules and instructions.'] },
         { id:'organizers', title:'Organizer responsibilities', paragraphs:['An organizer should have authority to represent the organization and provide accurate event details. Announcements should clearly describe eligibility, dates, fees, prizes, judging, contact arrangements, and registration steps. Listings remain private until an administrator approves them in Django Admin.','Changes, postponements, and cancellations should be communicated clearly. A draft or pending submission is not a public listing; check My Competitions for its current review status.'] },
         { id:'recruiters', title:'Recruiter responsibilities', paragraphs:['Opportunities should accurately describe the company, role, work arrangement, required skills, and application process. Do not present a sample role, shortlist, or interview status as a real offer or hiring decision.','Handle applicant information with care and use it only for an appropriate recruitment purpose. The current recruiter workspace does not contact candidates or transfer an application to an employer.'] },
-        { id:'sources', title:'External listings and automatic imports', paragraphs:['Imported content should retain the original source and be checked for accuracy, missing information, and duplicates. An import label is not an endorsement or a guarantee that an organizer, event, prize, or opportunity is verified.','The Live imports section uses the Codeforces API and can publish new contests under a staff-enabled automatic-publication policy. Changes to existing published entries require review. Other source connectors, including Facebook, remain unavailable. Confirm registration and material event details with the original organizer.'] },
+        { id:'sources', title:'External listings and automatic imports', paragraphs:['Imported content should retain the original source and be checked for accuracy, missing information, and duplicates. An import label is not an endorsement or a guarantee that an organizer, event, prize, or opportunity is verified.','The Live imports section uses the official Codeforces API, AtCoder schedule and Major League Hacking schedule. New AtCoder and MLH sources default to review before publication; staff can enable automatic publication. Changes to existing published entries require review. University announcements from configured BUET CSE, UIU, NSU ECE and DIU pages require staff verification. The university publishing a notice is not necessarily the event host. Facebook and other unimplemented connectors remain unavailable. Confirm registration and material event details with the original organizer.'] },
         { id:'ownership', title:'Content and attribution', paragraphs:['Only submit text, links, images, and other materials you are entitled to provide. Respect the work of participants, organizers, companies, and source publishers, and give appropriate attribution.','The current preview does not establish a live content-license agreement or transfer ownership of your work. Any permissions required for hosting, displaying, or distributing user content must be defined before those features launch.'] },
         { id:'results', title:'Results, rankings, and availability', paragraphs:['Public rankings and event statistics currently use sample data. Locally submitted or approved results do not change the public sample leaderboard. A final scoring policy and a verification process are needed before live results are published.','Dates, availability, and registration instructions can change on external sites. Check the original announcement before making travel plans, payments, or other commitments. The current preview does not process payments or guarantee a prize, interview, job, or event place.'] },
         { id:'moderation', title:'Corrections and moderation', paragraphs:['Competition submissions are reviewed in Django Admin. Administrators can publish complete submissions or reject them with a review reason; rejected records remain private unless resubmitted and approved. The Live imports section has staff-protected source and candidate controls. Older sample import tabs and account-status changes remain previews.','Use Help & Contact to prepare a report with a page link and enough detail to understand the issue. Reports are not delivered to a moderation team until a support service is connected.'] },
@@ -636,6 +716,21 @@
     const date = new Date(value);
     return Number.isNaN(date.getTime()) ? '' : new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   }
+  function FacebookPostSuggestion() {
+    const [form,setForm]=useState({post_url:'',title:'',notes:''}),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[error,setError]=useState(false);
+    async function submit(e){e.preventDefault();setBusy(true);setMessage('');try{const data=await requestApi('/discovery/facebook/suggest/',{method:'POST',body:form});setMessage(data.detail);setError(false);setForm({post_url:'',title:'',notes:''});}catch(e){setError(true);setMessage(Object.entries(e.data||{}).map(([k,v])=>(k==='detail'?'':k+': ')+(Array.isArray(v)?v.join(' '):v)).join(' · ')||e.message);}finally{setBusy(false);}}
+    return <Panel title="Found a competition on Facebook?" icon="rocket">
+      <p className="work-item-copy">Suggest its post link for staff review. You do not need to manage the Page. This form does not automatically read the post.</p>
+      {message&&<Notice error={error}>{message}</Notice>}
+      <form className="page-form" onSubmit={submit}>
+        <Field name="post_url" label="Facebook post link" type="url" required maxLength={1000} value={form.post_url} onChange={e=>setForm({...form,post_url:e.target.value})}/>
+        <Field name="facebook_title" label="Competition title" required minLength={10} maxLength={180} value={form.title} onChange={e=>setForm({...form,title:e.target.value})}/>
+        <Field name="facebook_notes" label="Details for the reviewer (optional)" type="textarea" required={false} maxLength={5000} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/>
+        <button type="submit" className="button-secondary" disabled={busy}>{busy?'Sending…':'Send Facebook link for review'}</button>
+      </form>
+    </Panel>;
+  }
+
   function RealSubmitCompetitionPage({ embedded = false, accountState, account, submission = null, onSaved, onCancel, navigate }) {
     const initialValues = () => ({
       title: submission?.title || '', description: submission?.description || '', host_organization: submission?.host_organization || '',
@@ -646,6 +741,7 @@
       registration_url: submission?.registration_url || '', source_url: submission?.source_url || '', eligibility: submission?.eligibility || '',
       team_size: submission?.team_size || '', prize_pool: submission?.prize_pool || '',
       registration_fee: submission?.registration_fee ?? '', registration_fee_currency: submission?.registration_fee_currency || 'BDT',
+      registration_mode: submission?.registration_mode || 'external',
       tags: Array.isArray(submission?.tags) ? submission.tags.join(', ') : ''
     });
     const [values, setValues] = useState(initialValues);
@@ -695,6 +791,7 @@
     const categoryOptions = DATA.categories.filter(item => item.id !== 'all').map(item => ({ value: item.id, label: item.name }));
     return <>{!embedded && <PageHeader eyebrow="FOR THE COMMUNITY BUILDERS" title="Big ideas deserve" accent="a great stage." description="Submit a CSE competition for administrator review. It stays private until approved." icon="rocket" />}
       <div className={embedded ? 'embedded-submission detail-layout' : 'page-container detail-layout'}><div className="detail-main">
+        {!submission&&<FacebookPostSuggestion/>}
         <div className="submission-steps">{['Competition details', 'Review your event', 'Saved to Django'].map((label, index) => <div key={label} className={['edit','review','complete'].indexOf(stage) >= index ? 'active' : ''}><span>{index + 1}</span>{label}</div>)}</div>
         {stage === 'edit' && <form className="page-form" noValidate onSubmit={event => {
           event.preventDefault(); const invalid = formErrors(event.currentTarget);
@@ -723,7 +820,7 @@
           </div></Panel>
           <Panel title="Eligibility and official links" icon="users">
             {field('eligibility', 'Who can participate?', { type: 'textarea', placeholder: 'Explain eligibility requirements.' })}
-            <div className="form-grid">{field('registration_url', 'Official registration URL', { type: 'url', placeholder: 'https://...' })}
+            <div className="form-grid">{field('registration_mode', 'Registration mode', { options: [{value:'external',label:'External official website'},{value:'internal',label:'Register on Talent Square'}], hint:'Internal registration is enabled only after administrator publication approval.' })}{field('registration_url', 'Official registration URL', { type: 'url', required: values.registration_mode !== 'internal', placeholder: 'https://...' })}
               {field('source_url', 'Announcement / source URL (optional)', { type: 'url', required: false, placeholder: 'https://...' })}</div>
             <div className="form-grid">{field('team_size', 'Team size (optional)', { required: false, placeholder: 'e.g. 2–4 members' })}
               {field('prize_pool', 'Prize pool (optional)', { required: false, placeholder: 'e.g. BDT 50,000 and certificates' })}</div>
@@ -751,6 +848,20 @@
       </div><div className="sidebar-tip"><Icon name="shieldcheck" className="w-5 h-5" /><p>Drafts and submissions are saved to your Django account, not browser storage.</p></div></aside></div>
     </>;
   }
+  function PublicProfilePage({profileId}) {
+    const [state,setState]=useState({status:'loading'});
+    useEffect(()=>{let active=true;requestApi('/profiles/'+profileId+'/').then(data=>{if(active)setState({status:'ready',data});}).catch(()=>{if(active)setState({status:'unavailable'});});return()=>{active=false;};},[profileId]);
+    if(state.status==='loading')return <div className="page-container"><Panel title="Loading profile"><p>Getting this profile…</p></Panel></div>;
+    if(state.status!=='ready')return <div className="page-container"><EmptyState title="Profile unavailable" text="This profile is private or no longer available."/></div>;
+    const {data}=state,p=data.profile||{};
+    const imageUrl=value=>value?AUTH_API.replace(/\/api$/,'')+value:'';
+    const labels={full_name:'Name',current_status:'Current status',institution_name:'Institution',department:'Department',graduation_year:'Graduation year',bio:'About',skills:'Skills',education_info:'Education',work_experience:'Experience',achievements:'Competition achievements (self-reported)',codeforces_handle:'Codeforces handle',atcoder_handle:'AtCoder handle',organization_name:'Organization',organizer_type:'Organizer type',contact_name:'Contact person',description:'About the organization',club_organization_name:'Club',recruiter_name:'Recruiter',company_name:'Company',recruiter_designation:'Job title',company_description:'About the company',hiring_interests:'Hiring interests',email:'Contact email',contact_phone:'Contact phone',github_url:'GitHub',linkedin_url:'LinkedIn',portfolio_url:'Portfolio',website_url:'Website',company_website:'Company website'};
+    return <div className="page-container public-profile-page"><div className="profile-preview-card"><div className="profile-monogram">{p.photo_url?<img src={imageUrl(p.photo_url)} alt={data.role==='organizer'?'Organization logo':'Profile photo'}/>:data.display_name.split(/\s+/).slice(0,2).map(x=>x[0]).join('')}</div><div><span className="eyebrow">{data.role} PROFILE</span><h1>{data.display_name}</h1><p>{p.company_name||p.institution_name||'Talent Square community'}</p></div>{p.company_logo_url&&<img className="public-company-logo" src={imageUrl(p.company_logo_url)} alt="Company logo"/>}</div>
+      <Panel title="Profile details" icon="user"><dl className="public-profile-fields">{Object.entries(labels).filter(([key])=>p[key]!==undefined&&p[key]!==''&&p[key]!==null&&(!Array.isArray(p[key])||p[key].length)).map(([key,label])=><div key={key}><dt>{label}</dt><dd>{key.endsWith('_url')||key==='company_website'?<a className="inline-link" href={p[key]} target="_blank" rel="noopener noreferrer">{p[key]} ↗</a>:Array.isArray(p[key])?p[key].join(', '):String(p[key])}</dd></div>)}</dl></Panel>
+      {!!data.competitions?.length&&<Panel title="Published competitions" icon="trophy">{data.competitions.map(c=><p key={c.id}><Link className="inline-link" to={'/competitions/'+c.id}>{c.title} →</Link></p>)}</Panel>}
+    </div>;
+  }
+
   function App() {
     const [location, setLocation] = useState(() => ({ path: window.location.pathname.replace(/\/$/, '') || '/', search: window.location.search }));
     useEffect(() => {
@@ -759,23 +870,25 @@
     }, []);
     const { path, search } = location;
     const competition = null;
-    const fair = path.startsWith('/job-fairs/') ? DATA.jobFairs.find(f => '/job-fairs/' + f.id === path) : null;
+    const fair = path.startsWith('/job-fairs/') ? {title:'Job fair'} : null;
     useEffect(() => {
-      document.title = (path === '/login' && new URLSearchParams(search).get('view') === 'recovery' ? 'Password recovery' :
-        titles[path] || competition?.title || fair?.title || 'Page not found') + ' · Talent Square';
+      document.title = (path === '/login' && ['recovery','reset'].includes(new URLSearchParams(search).get('view')) ? 'Password recovery' :
+        (path.startsWith('/profiles/')?'Community profile':titles[path]) || competition?.title || fair?.title || 'Page not found') + ' · Talent Square';
       window.scrollTo(0, 0);
       document.getElementById('main-content')?.focus({ preventScroll: true });
     }, [path, search]);
     const callbacks = { onOpenAuth: view => navigate(authPath(view)), onOpenSubmit: () => navigate(SUBMIT_PATH), onNavigateSection: section => navigate(sectionPaths[section] || '/') };
     const selectContest = c => navigate('/competitions/' + c.id), selectFair = f => navigate('/job-fairs/' + f.id);
     let page;
-    if (path === '/') page = <><HeroSection {...callbacks} /><ExploreCompetitionsSection onSelectContest={selectContest} /><JobFairSection onSelectFair={selectFair} onOpenAuth={callbacks.onOpenAuth} /><RankingsSection /></>;
+    if (path === '/') page = <><HeroSection {...callbacks} /><ExploreCompetitionsSection onSelectContest={selectContest} /><FairUI.Home/><RankingsSection /></>;
+    else if (path === '/login' && new URLSearchParams(search).get('view') === 'reset') page = <ResetPasswordPage key={search} search={search}/>;
     else if (['/login','/signup','/forgot-password'].includes(path)) page = <AuthPage key={path + (new URLSearchParams(search).get('view') || '')} mode={path === '/login' && new URLSearchParams(search).get('view') === 'recovery' ? 'forgot-password' : path.slice(1)} search={search} />;
     else if (path === '/competitions') page = <ExploreCompetitionsPage onSelectContest={selectContest} onOpenSubmit={callbacks.onOpenSubmit} />;
     else if (path.startsWith('/competitions/')) page = <CompetitionDetails key={path} competitionId={path.split('/').filter(Boolean).pop()} />;
     else if (path === '/job-fairs') page = <JobFairsPage onOpenAuth={callbacks.onOpenAuth} onSelectFair={selectFair} />;
-    else if (path.startsWith('/job-fairs/')) page = <JobFairDetails key={path} fair={fair} />;
+    else if (path.startsWith('/job-fairs/')) page = <JobFairDetails key={path} id={path.split('/').filter(Boolean)[1]} />;
     else if (path === '/rankings') page = <RankingsPage />;
+    else if (/^\/profiles\/\d+$/.test(path)) page = <PublicProfilePage key={path} profileId={path.split('/').pop()}/>;
     else if (path === '/workspace') page = <WorkspacePage search={search} />;
     else if (path === '/admin') page = <AdminPage search={search} />;
     else if (path === '/help') page = <HelpPage key={search} search={search} />;
@@ -787,8 +900,10 @@
     return <><a className="skip-link" href="#main-content">Skip to content</a><Navbar key={path} currentPath={path} {...callbacks} />
       <main id="main-content" tabIndex={-1}>{page}</main><Footer {...callbacks} /></>;
   }
+  const FairUI = window.TalentSquareJobFairUI = window.createTalentSquareJobFairs({Link,Panel,Notice,requestApi});
   const { WorkspacePage, AdminPage } = window.createTalentSphereWorkspaces({
     Icon, Link, Panel, Field, Notice, EmptyState, SubmitCompetitionPage: RealSubmitCompetitionPage, navigate, readStored, formErrors, focusError, requestApi
   });
+  window.TalentSquareActivity = { BookmarkButton: ParticipantBookmarkButton };
   ReactDOM.createRoot(document.getElementById('root')).render(<App />);
 })();

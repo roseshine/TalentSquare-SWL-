@@ -92,6 +92,8 @@ window.createTalentSphereWorkspaces = function ({
     organizer: [['overview','Overview','layoutgrid'],['competitions','My competitions','trophy'],['create','Create competition','rocket'],['participants','Participants','users'],['results','Results','trendingup'],['profile','Organization','building2'],['notifications','Notifications','clock'],['settings','Settings','shieldcheck']],
     recruiter: [['overview','Overview','layoutgrid'],['opportunities','Opportunities','briefcase'],['applicants','Applicants','users'],['talent','Find talent','search'],['profile','Company profile','building2'],['notifications','Notifications','clock'],['settings','Settings','shieldcheck']]
   };
+  menus.participant.push(['fairs','My job fairs','briefcase']);
+  menus.organizer.push(['fairs','My job fairs','briefcase']);
   const adminMenu = [['overview','Overview','layoutgrid'],['live-imports','Live imports','rocket'],['approvals','Approvals','checkcircle2'],['users','People & roles','users'],['sources','Import sources','layoutgrid'],['imports','Import review','eye'],['history','Import history','clock'],['rankings','Results & rankings','trendingup'],['fairs','Job fairs','briefcase']];
   const descriptions = {
     overview: 'A clear view of what matters, and an easy path to your next step.',
@@ -141,7 +143,7 @@ window.createTalentSphereWorkspaces = function ({
         </aside><div className="workspace-content">
           <div className="workspace-topline"><span className="eyebrow">{admin ? 'BEHIND THE COMMUNITY' : role.toUpperCase() + ' SPACE'}</span><span className="work-preview-pill">{live ? 'Django import service' : authenticated ? 'Django account' : 'Frontend preview'}</span></div>
           <header className="workspace-heading"><h1>{heading}</h1><p>{descriptions[tab]}</p></header>
-          <div className="workspace-preview-note"><Icon name="info" className="w-4 h-4" /><span>{live ? 'Connected controls · A staff account is required. Source runs and review decisions affect Django records.' : admin ? 'Sample data · Changes stay in this browser. No real users are moderated, events published, or sources contacted.' : 'Workspace activity is a preview. Your saved profile comes from Django; signed-out demo edits stay in this browser.'}</span></div>
+          <div className="workspace-preview-note"><Icon name="info" className="w-4 h-4" /><span>{live ? 'Connected controls · A staff account is required. Source runs and review decisions affect Django records.' : admin ? 'Sample data · Changes stay in this browser. No real users are moderated, events published, or sources contacted.' : authenticated ? 'Competition bookmarks, Participant activity and organizer registrations use Django. Applications, results and notifications remain labelled previews.' : 'Signed-out demonstration: activity and saved events stay in this browser and are not account records.'}</span></div>
           {children}
         </div></div>
       </div>
@@ -193,7 +195,7 @@ window.createTalentSphereWorkspaces = function ({
       <input type="checkbox" role="switch" checked={!!db.settings[key]} onChange={e=>{const checked=e.target.checked;setDb(d=>({...d,settings:{...d.settings,[key]:checked}}));notify('Preference saved on this device.');}} /></label>)}</Panel>
       <Panel title="Account security" icon="shieldcheck"><p>{account ? `${account.display_name} · ${account.email} · ${account.role}` : accountStatus}</p>
         {account && <p><strong>Signed in with a Django session.</strong></p>}
-        <p>Login sessions use the Django backend. Password recovery is not connected yet.</p>
+        <p>Login sessions use the Django backend. Password recovery uses an expiring reset link. Local messages are saved privately until an email provider is configured.</p>
         {account ? <button type="button" className="button-secondary" disabled={loggingOut} onClick={signOut}>{loggingOut ? 'Signing out…' : 'Log out'}</button> : <Link className="inline-link" to="/login">Go to login</Link>}
         <Link className="inline-link" to="/login?view=recovery">Password recovery</Link></Panel></>;
   }
@@ -218,18 +220,39 @@ window.createTalentSphereWorkspaces = function ({
     'University', 'College', 'School', 'Company / Corporate Organization',
     'Community Organization', 'Individual Organizer'
   ];
+  const profileMediaUrl = value => value ? 'http://' + (window.location.hostname==='localhost'?'localhost':'127.0.0.1') + ':8001' + value : '';
+  function ProfileImageEditor({kind,label,account,onSaved}) {
+    const [file,setFile]=useState(null),[preview,setPreview]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+    const current=account.profile?.[kind+'_url'];
+    useEffect(()=>{if(!file){setPreview('');return;}const url=URL.createObjectURL(file);setPreview(url);return()=>URL.revokeObjectURL(url);},[file]);
+    async function save(remove=false){setBusy(true);setError('');try{const form=new FormData();if(!remove)form.append('image',file);const updated=await requestApi('/auth/profile/images/'+kind+'/',{method:remove?'DELETE':'POST',body:remove?{}:form});onSaved(updated);setFile(null);}catch(e){setError(e.data?.image?.join?.(' ')||e.data?.detail||e.message);}finally{setBusy(false);}}
+    return <div className="profile-image-editor"><h3>{label}</h3><div className="profile-image-preview">{preview||current?<img src={preview||profileMediaUrl(current)} alt={label+' preview'}/>:<span>Optional</span>}</div>
+      <label className="work-label">Choose {label.toLowerCase()}<input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e=>{setError('');const next=e.target.files?.[0];if(next&&next.size>5*1024*1024){setError('Choose an image smaller than 5 MB.');setFile(null);}else setFile(next||null);}}/></label>
+      <p className="small-note">JPEG, PNG or WebP, up to 5 MB. Images are resized and metadata is removed. Public visibility follows your profile setting.</p>
+      {error&&<Notice error>{error}</Notice>}<div className="form-actions"><button className="button-secondary" disabled={!file||busy} onClick={()=>save(false)}>{busy?'Saving…':current?'Replace image':'Upload image'}</button>{current&&<button className="work-text-button" disabled={busy} onClick={()=>save(true)}>Remove {label.toLowerCase()}</button>}</div>
+    </div>;
+  }
+  function ProfileImages({role,account,onSaved}) {return <Panel title="Photos and logos" icon="user"><div className="profile-image-grid"><ProfileImageEditor kind="photo" label={role==='organizer'?'Organization logo':'Profile photo'} account={account} onSaved={onSaved}/>{role==='recruiter'&&<ProfileImageEditor kind="company_logo" label="Company logo" account={account} onSaved={onSaved}/>}</div></Panel>;}
+
   function ProfileEditForm({ role, account, requestApi, onCancel, onSaved }) {
     const profile = account.profile || {};
     const [values,setValues] = useState(() => role === 'participant' ? {
+      is_public: !!profile.is_public, show_email: !!profile.show_email, show_phone: !!profile.show_phone, contact_phone: profile.contact_phone || '',
       full_name: profile.full_name || account.display_name || '',
       current_status: profile.current_status || '',
       institution_name: profile.institution_name || '',
+      department: profile.department || '', graduation_year: profile.graduation_year ?? '',
+      codeforces_handle: profile.codeforces_handle || '', atcoder_handle: profile.atcoder_handle || '',
+      achievements: profile.achievements || '', portfolio_url: profile.portfolio_url || '',
+      education_info: profile.education_info || '', work_experience: profile.work_experience || '',
       bio: profile.bio || '',
       skills: Array.isArray(profile.skills) ? profile.skills.join(', ') : '',
       github_url: profile.github_url || '',
       linkedin_url: profile.linkedin_url || '',
       availability_preferences: Array.isArray(profile.availability_preferences) ? profile.availability_preferences : []
     } : role === 'organizer' ? {
+      is_public: !!profile.is_public, show_email: !!profile.show_email, show_phone: !!profile.show_phone, contact_phone: profile.contact_phone || '',
+      contact_name: profile.contact_name || '',
       organization_name: profile.organization_name || account.display_name || '',
       organizer_type: profile.organizer_type || '',
       is_affiliated: profile.is_affiliated ? 'true' : 'false',
@@ -239,6 +262,8 @@ window.createTalentSphereWorkspaces = function ({
       description: profile.description || '',
       website_url: profile.website_url || ''
     } : {
+      is_public: !!profile.is_public, show_email: !!profile.show_email, show_phone: !!profile.show_phone, contact_phone: profile.contact_phone || '',
+      linkedin_url: profile.linkedin_url || '', hiring_interests: (profile.hiring_interests || []).join(', '),
       recruiter_name: profile.recruiter_name || account.display_name || '',
       company_name: profile.company_name || '',
       company_website: profile.company_website || '',
@@ -275,12 +300,16 @@ window.createTalentSphereWorkspaces = function ({
       full_name: values.full_name,
       current_status: values.current_status,
       institution_name: values.institution_name,
+      department: values.department, graduation_year: values.graduation_year === '' ? null : Number(values.graduation_year),
+      codeforces_handle: values.codeforces_handle, atcoder_handle: values.atcoder_handle, achievements: values.achievements,
+      portfolio_url: values.portfolio_url, education_info: values.education_info, work_experience: values.work_experience,
       bio: values.bio,
       skills: String(values.skills || '').split(',').map(skill => skill.trim()).filter(Boolean),
       github_url: values.github_url,
       linkedin_url: values.linkedin_url,
       availability_preferences: values.availability_preferences
     } : role === 'organizer' ? {
+      contact_name: values.contact_name,
       organization_name: values.organization_name,
       organizer_type: values.organizer_type,
       is_affiliated: affiliated,
@@ -290,6 +319,7 @@ window.createTalentSphereWorkspaces = function ({
       description: values.description,
       website_url: values.website_url
     } : {
+      linkedin_url: values.linkedin_url, hiring_interests: values.hiring_interests.split(',').map(x=>x.trim()).filter(Boolean),
       recruiter_name: values.recruiter_name,
       company_name: values.company_name,
       company_website: values.company_website,
@@ -309,7 +339,7 @@ window.createTalentSphereWorkspaces = function ({
       }
       setSaving(true);
       try {
-        const updated = await requestApi('/auth/profile/',{method:'PATCH',body:payload()});
+        const updated = await requestApi('/auth/profile/',{method:'PATCH',body:{...payload(),is_public:values.is_public,show_email:values.show_email,show_phone:values.show_phone,contact_phone:values.contact_phone}});
         if (!updated?.authenticated || updated.id !== account.id || updated.role !== role || !updated.profile) {
           throw new Error('The account service did not confirm the saved profile.');
         }
@@ -334,6 +364,14 @@ window.createTalentSphereWorkspaces = function ({
         ...(status && status !== 'Unemployed / Not Currently Studying' ? [
           {name:'institution_name',label:institutionLabel,required:true,maxLength:200}
         ] : []),
+        {name:'department',label:'Department',required:false,maxLength:150},
+        {name:'graduation_year',label:'Graduation year',type:'number',required:false,min:1900,max:2100},
+        {name:'codeforces_handle',label:'Codeforces handle',required:false,maxLength:24},
+        {name:'atcoder_handle',label:'AtCoder handle',required:false,maxLength:32},
+        {name:'portfolio_url',label:'Portfolio URL',type:'url',required:false,maxLength:200},
+        {name:'education_info',label:'Education',type:'textarea',required:false,maxLength:5000},
+        {name:'work_experience',label:'Work experience',type:'textarea',required:false,maxLength:5000},
+        {name:'achievements',label:'Competition achievements (self-reported)',type:'textarea',required:false,maxLength:5000},
         {name:'bio',label:'Bio',type:'textarea',required:false,maxLength:5000},
         {name:'skills',label:'Skills',required:false,placeholder:'Separate skills with commas'},
         {name:'github_url',label:'GitHub profile URL',type:'url',required:false,maxLength:200,placeholder:'https://github.com/you'},
@@ -341,6 +379,7 @@ window.createTalentSphereWorkspaces = function ({
       ];
     } else if (role === 'organizer') {
       fields = [
+        {name:'contact_name',label:'Contact person',required:false,maxLength:150},
         {name:'organization_name',label:'Organization / club name',required:true,maxLength:200},
         {name:'organizer_type',label:'Organizer type',options:organizerTypes,required:true},
         {name:'is_affiliated',label:'Institution affiliation',options:[{value:'true',label:'Affiliated with an institution'},{value:'false',label:'Independent / corporate organizer'}],required:true},
@@ -354,6 +393,8 @@ window.createTalentSphereWorkspaces = function ({
       fields = [
         {name:'recruiter_name',label:'Recruiter name',required:true,maxLength:150},
         {name:'company_name',label:'Company name',required:true,maxLength:200},
+        {name:'hiring_interests',label:'Hiring interests',required:false,placeholder:'Frontend, Python, internships — separate with commas'},
+        {name:'linkedin_url',label:'LinkedIn profile URL',type:'url',required:false,maxLength:200},
         {name:'recruiter_designation',label:'Recruiter designation',required:false,maxLength:150},
         {name:'company_website',label:'Company website',type:'url',required:false,maxLength:200,placeholder:'https://example.com'},
         {name:'company_description',label:'Company description',type:'textarea',required:false,maxLength:5000}
@@ -370,6 +411,13 @@ window.createTalentSphereWorkspaces = function ({
           </label>)}
           {fieldError('availability_preferences') && <p className="field-error" id="availability-error">{fieldError('availability_preferences')}</p>}
         </fieldset>}
+        <fieldset className="profile-availability-group profile-privacy"><legend>Profile and contact privacy</legend>
+          <p className="small-note">Making your profile public shares the details and images above. Your login email and contact phone stay hidden unless you choose to share them separately. Achievements are self-reported.</p>
+          <label><input type="checkbox" checked={values.is_public} disabled={saving} onChange={e=>change('is_public',e.target.checked)}/>Make my profile public</label>
+          <label><input type="checkbox" checked={values.show_email} disabled={saving} onChange={e=>change('show_email',e.target.checked)}/>Show my email on my public profile</label>
+          <Field name="contact_phone" label="Contact phone (optional)" type="tel" required={false} maxLength={40} value={values.contact_phone} disabled={saving} error={fieldError('contact_phone')} onChange={e=>change('contact_phone',e.target.value)}/>
+          <label><input type="checkbox" checked={values.show_phone} disabled={saving} onChange={e=>change('show_phone',e.target.checked)}/>Show my contact phone on my public profile</label>
+        </fieldset>
         {formError && <Notice error>{formError}</Notice>}
         <div className="form-actions"><button type="button" className="button-secondary" disabled={saving} onClick={onCancel}>Cancel</button>
           <button type="submit" className="button-primary" disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}<Icon name={saving ? 'clock' : 'checkcircle2'} className="w-4 h-4" /></button></div>
@@ -389,6 +437,9 @@ window.createTalentSphereWorkspaces = function ({
       ['Email', account.email],
       ['Current status', profile.current_status],
       ['University, college, school, or workplace', profile.institution_name],
+      ['Department', profile.department], ['Graduation year', profile.graduation_year],
+      ['Codeforces handle', profile.codeforces_handle], ['AtCoder handle', profile.atcoder_handle],
+      ['Competition achievements (self-reported)', profile.achievements], ['Portfolio', profile.portfolio_url],
       ['Bio', profile.bio],
       ['Skills', profile.skills],
       ['GitHub URL', profile.github_url],
@@ -398,6 +449,7 @@ window.createTalentSphereWorkspaces = function ({
       ['Work experience', profile.work_experience],
       ['Profile visibility', profile.is_public]
     ] : organizer ? [
+      ['Contact person', profile.contact_name],
       ['Organization name', profile.organization_name],
       ['Organizer type', profile.organizer_type],
       ['Affiliated with an institution', profile.is_affiliated ? 'Yes' : 'No'],
@@ -408,6 +460,7 @@ window.createTalentSphereWorkspaces = function ({
       ['Description', profile.description],
       ['Profile visibility', profile.is_public]
     ] : [
+      ['Hiring interests', profile.hiring_interests], ['LinkedIn', profile.linkedin_url],
       ['Recruiter name', profile.recruiter_name],
       ['Company name', profile.company_name],
       ['Designation', profile.recruiter_designation],
@@ -418,11 +471,17 @@ window.createTalentSphereWorkspaces = function ({
     const initials = String(name || '?').trim().split(/\s+/).slice(0, 2).map(word => word[0]).join('').toUpperCase() || '?';
     if (editing) return <ProfileEditForm role={role} account={account} requestApi={requestApi} onCancel={()=>setEditing(false)}
       onSaved={updated=>{setAccountState({status:'loaded',account:updated});setEditing(false);notify('Your profile was saved to your Django account.');}}/>;
-    return <><div className="profile-preview-card"><div className="profile-monogram">{initials}</div><div>
+    return <><div className="profile-preview-card"><div className="profile-monogram">{profile.photo_url?<img src={profileMediaUrl(profile.photo_url)} alt={organizer?'Organization logo':'Profile photo'}/>:initials}</div><div>
         <span className="eyebrow">{role} ACCOUNT PROFILE</span><h2>{name}</h2><p>{subtitle || account.email}</p>
       </div><Badge>Django account</Badge></div>
+      {new URLSearchParams(window.location.search).get('photo')==='retry'&&!profile.photo_url&&<Notice>Your account was created and you are signed in. The signup photo could not be saved; choose a valid image below to try again.</Notice>}
       {!account.profile && <Notice>This account does not have a saved {role} profile yet. The displayed name comes from the signed-in account.</Notice>}
       <div className="profile-edit-actions">{account.profile && <button type="button" className="button-secondary" onClick={()=>setEditing(true)}>Edit Profile</button>}</div>
+      {account.profile&&<><ProfileImages role={role} account={account} onSaved={updated=>setAccountState({status:'loaded',account:updated})}/>
+        <Panel title="Profile sharing" icon="shieldcheck"><p>{profile.is_public?'Your profile is public.':'Your profile is private. Only you can see it.'} {profile.show_email?'Email sharing is enabled.':'Your email is hidden from public profiles.'} {profile.show_phone?'Phone sharing is enabled.':'Your phone is hidden from public profiles.'}</p>
+          {profile.is_public&&<Link className="inline-link" to={'/profiles/'+account.id}>Open public profile →</Link>}
+          {organizer&&<p><Link className="inline-link" to="/workspace?role=organizer&tab=competitions">Manage your competitions →</Link></p>}
+        </Panel></>}
       <ProfileDetails fields={fields}/>
       <p className="preview-notice"><Icon name="info" className="w-4 h-4"/><span>These details are read from your signed-in Django account. Changes you save here update your account profile.</span></p>
     </>;
@@ -462,6 +521,54 @@ window.createTalentSphereWorkspaces = function ({
     }}>Remove saved event</button></>}/>):<EmptyState title="Your next favorite is out there" text="Save an event from its detail page and it will appear here." />}
       <Link className="inline-link" to="/competitions">Explore competitions →</Link></Panel>;
   }
+  async function readActivityPages(path) {
+    const rows=[];
+    for(let page=0;path;page++){
+      if(page>=100)throw new Error('There are too many activity records for this view. Contact support.');
+      const data=await requestApi(path);rows.push(...(data.results||[]));
+      if(data.next){const url=new URL(data.next,window.location.origin);if(!/^\/api\/(participant|organizer)\//.test(url.pathname))throw new Error('Invalid activity page.');path=url.pathname.slice(4)+url.search;}else path=null;
+    }
+    return rows;
+  }
+
+  function RealParticipantCompetitions({savedOnly=false}) {
+    const [state,setState]=useState({status:'loading',items:[]}),[section,setSection]=useState(savedOnly?'saved':'all'),[query,setQuery]=useState(''),[revision,setRevision]=useState(0),[busy,setBusy]=useState(''),[message,setMessage]=useState('');
+    useEffect(()=>{
+      let active=true;setState(s=>({...s,status:'loading'}));
+      Promise.all([readActivityPages('/participant/bookmarks/?page_size=60'),readActivityPages('/participant/registrations/?page_size=60'),readActivityPages('/participant/participations/?page_size=60')]).then(([saved,registrations,reports])=>{
+        const map=new Map();const entry=c=>{if(!map.has(c.id))map.set(c.id,{...c});return map.get(c.id);};
+        saved.forEach(r=>entry(r.competition).bookmark=r);registrations.forEach(r=>entry(r.competition).registration=r);reports.forEach(r=>entry(r.competition).report=r);
+        if(active)setState({status:'ready',items:[...map.values()]});
+      }).catch(error=>{if(active)setState({status:'error',items:[],error:error.message});});
+      return()=>{active=false;};
+    },[revision]);
+    async function action(key,path,method){if(busy)return;setBusy(key);setMessage('');try{await requestApi(path,{method,body:{}});setMessage(method==='DELETE'&&path.includes('/registrations/')?'Registration withdrawn; history retained.':'Bookmark removed.');setRevision(r=>r+1);}catch(error){setMessage(error.message);}finally{setBusy('');}}
+    if(state.status==='loading')return <Panel title="Loading your competition activity" icon="clock"><p role="status">Reading your saved Django records…</p></Panel>;
+    if(state.status==='error')return <Panel title="Competition activity unavailable" icon="info"><Notice error>{state.error}</Notice><button className="button-secondary" onClick={()=>setRevision(r=>r+1)}>Try again</button></Panel>;
+    const counts={saved:state.items.filter(i=>i.bookmark).length,internal:state.items.filter(i=>i.registration?.registration_status==='active').length,external:state.items.filter(i=>i.report?.reported_status==='registered_external').length};
+    const visible=state.items.filter(i=>[i.title,i.category,i.source_name,i.organizer].join(' ').toLowerCase().includes(query.toLowerCase())&&(section==='all'||section==='saved'&&i.bookmark||section==='internal'&&i.registration||section==='upcoming'&&i.event_start_date&&new Date(i.event_start_date)>new Date()||i.report?.reported_status===section));
+    return <><Stats items={[{label:'Interested / bookmarked',value:counts.saved,icon:'sparkles',detail:'Saved to your Participant account'},{label:'Registered on Talent Square',value:counts.internal,icon:'trophy',detail:'Active internal registrations'},{label:'Registered externally',value:counts.external,icon:'code2',detail:'Self-reported; not verified'}]}/>
+      <Panel title={savedOnly?'Saved competitions':'My Competitions'} icon="trophy"><p className="small-note">Real account records. External activity is self-reported — not verified by Talent Square. Browser-only preview saves are not imported.</p>
+        <Toolbar query={query} onQuery={setQuery} placeholder="Search your competition activity"><select className="form-input" aria-label="Activity section" value={section} onChange={e=>setSection(e.target.value)}>{[['all','All activity'],['saved','Saved / Interested'],['internal','Talent Square registrations (including withdrawn)'],['interested','Interested externally'],['planning','Planning to Register'],['registered_external','Registered Externally — Self-Reported'],['participated','Participated — Self-Reported'],['completed','Completed — Self-Reported'],['upcoming','Upcoming Competitions']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></Toolbar>
+        {message&&<p role="status">{message}</p>}
+        {visible.map(item=><ListItem key={item.id} title={item.title} subtitle={[item.category,item.event_start_date?new Date(item.event_start_date).toLocaleString():'Date not provided',item.source_name||item.organizer].filter(Boolean).join(' · ')} badge={item.registration_mode==='internal'?'Internal registration':'External registration'}>
+          {item.bookmark&&<p>Interested / bookmarked</p>}{item.registration&&<p>{item.registration.status_label} · {new Date(item.registration.registered_at).toLocaleString()}</p>}{item.report&&<><p>{item.report.status_label}</p><p className="small-note">{item.report.notice}</p></>}
+          <div className="work-item-actions">{item.available!==false&&<Link className="inline-link" to={'/competitions/'+item.id}>Competition details / update activity →</Link>}{item.bookmark&&<button className="button-secondary" disabled={!!busy} onClick={()=>action('bookmark-'+item.id,`/participant/competitions/${item.id}/bookmark/`,'DELETE')}>Remove bookmark</button>}
+          {item.registration?.registration_status==='active'&&new Date(item.event_start_date)>new Date()&&<button className="button-secondary" disabled={!!busy} onClick={()=>{if(window.confirm('Withdraw this registration? It cannot be reopened.'))action('registration-'+item.id,`/participant/registrations/${item.registration.id}/`,'DELETE');}}>Withdraw registration</button>}</div>
+        </ListItem>)}
+        {!visible.length&&<EmptyState title="No competition activity here yet" text="Explore published competitions to bookmark, register internally, or add a self-reported external status."/>}
+      </Panel></>;
+  }
+
+  function RealOrganizerParticipants() {
+    const [events,setEvents]=useState([]),[selected,setSelected]=useState(''),[rows,setRows]=useState([]),[status,setStatus]=useState('loading'),[error,setError]=useState('');
+    useEffect(()=>{let active=true;readActivityPages('/organizer/competitions/?page_size=60').then(items=>{if(active){const internal=items.filter(i=>i.registration_mode==='internal');setEvents(internal);setSelected(internal[0]?String(internal[0].id):'');setStatus('ready');}}).catch(e=>{if(active){setError(e.message);setStatus('error');}});return()=>{active=false;};},[]);
+    useEffect(()=>{let active=true;if(!selected)return;setStatus('loading');readActivityPages(`/organizer/competitions/${selected}/registrations/?page_size=60`).then(items=>{if(active){setRows(items);setStatus('ready');}}).catch(e=>{if(active){setError(e.message);setStatus('error');}});return()=>{active=false;};},[selected]);
+    return <Panel title="Internal competition registrations" icon="users"><p className="small-note">Only registrations for your own internal competitions. External reports are private to Participants; emails and unrelated profile details are not shown.</p><label className="work-label">Your competition<select className="form-input" aria-label="Your internal competition" value={selected} onChange={e=>setSelected(e.target.value)}>{events.map(e=><option key={e.id} value={e.id}>{e.title}</option>)}</select></label>
+      {status==='loading'?<p role="status">Loading registrations…</p>:status==='error'?<Notice error>{error}</Notice>:<><div className="work-table-wrap"><table className="work-table"><thead><tr><th>Participant</th><th>Registered</th><th>Status</th></tr></thead><tbody>{rows.map(r=><tr key={r.id}><td>{r.participant_name}</td><td>{new Date(r.registered_at).toLocaleString()}</td><td>{r.status_label}{r.withdrawn_at&&' · '+new Date(r.withdrawn_at).toLocaleString()}</td></tr>)}</tbody></table></div>{!rows.length&&<EmptyState title={events.length?'No registrations yet':'No internal competitions'} text="Internal registration must be selected in an organizer submission and approved before Participants can register."/>}</>}
+    </Panel>;
+  }
+
   function ParticipantCompetitions({db,setDb,notify}) {
     const [selected,setSelected]=useState('');
     return <><Panel title="Your competition journey" icon="trophy">{db.registrations.map(r=>{
@@ -671,7 +778,12 @@ window.createTalentSphereWorkspaces = function ({
     const notify=(text,error=false)=>setFeedback({text,error});
     const props={db,setDb,notify};
     let body;
-    if(tab==='overview')body=<WorkspaceOverview role={role} db={db} account={account} accountState={accountState} requestApi={requestApi}/>;
+    if(accountState.status==='loaded'&&account?.role==='participant'&&['overview','competitions','saved'].includes(tab))body=<><WorkspaceAccountSummary role={role} account={account}/><RealParticipantCompetitions key={tab} savedOnly={tab==='saved'}/></>;
+    else if(['loading','error'].includes(accountState.status)&&role==='participant'&&['overview','competitions','saved'].includes(tab))body=<Panel title="Participant competition activity" icon="clock"><p>{accountState.status==='loading'?'Checking your Participant session?':'Account service unavailable. Reload to try again.'}</p></Panel>;
+    else if(['loading','error'].includes(accountState.status)&&role==='organizer'&&tab==='participants')body=<Panel title="Organizer registrations" icon="clock"><p>{accountState.status==='loading'?'Checking your Organizer session?':'Account service unavailable. Reload to try again.'}</p></Panel>;
+    else if(accountState.status==='loaded'&&account?.role==='organizer'&&tab==='participants')body=<RealOrganizerParticipants/>;
+    else if(tab==='fairs')body=role==='organizer'?<window.TalentSquareJobFairUI.Organizer/>:<window.TalentSquareJobFairUI.Participant/>;
+    else if(tab==='overview')body=<WorkspaceOverview role={role} db={db} account={account} accountState={accountState} requestApi={requestApi}/>;
     else if(tab==='profile')body=<Profile role={role} {...props} accountState={accountState} account={account} requestApi={requestApi} setAccountState={setAccountState}/>;
     else if(tab==='settings')body=<Settings {...props} requestApi={requestApi} navigate={navigate} accountState={accountState} account={account} setAccountState={setAccountState}/>;
     else if(tab==='notifications')body=<Notifications {...props}/>;
@@ -785,8 +897,60 @@ window.createTalentSphereWorkspaces = function ({
         <button className="button-secondary" onClick={()=>{setDb(d=>({...d,fairs:d.fairs.map(x=>x.id===f.id?{...x,status:x.status==='Listed'?'Paused':'Listed'}:x)}));notify('Directory status updated locally. Public sample pages are unchanged.');}}>{f.status==='Listed'?'Pause preview':'Restore preview'}</button></>}/>)}</Panel>
       {editor&&<DemoForm key={editor.id} title="Career event details" initial={editor} fields={[{name:'title',label:'Event title'},{name:'date',label:'Event dates',hint:'For example: November 12–13, 2026'}]} onSave={v=>{setDb(d=>({...d,fairs:d.fairs.map(f=>f.id===editor.id?{...f,...v}:f)}));setEditor(null);notify('Fair listing preview saved.');}}><button className="work-text-button" type="button" onClick={()=>setEditor(null)}>Cancel</button></DemoForm>}</>;
   }
+  function UniversityReviewDetails({candidate,busy,onSave}) {
+    const payload={...candidate.payload,...candidate.review_overrides};
+    const localDate=value=>{
+      if(!value)return '';
+      const date=new Date(value);
+      return Number.isNaN(date.getTime())?'':new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+    };
+    const [draft,setDraft]=useState(()=>Object.fromEntries(['title','description','competition_category','event_start_date','event_end_date','registration_deadline','organizer_name','host_organization','host_type','university_name','event_mode','location','registration_url','eligibility'].map(name=>[name,name.endsWith('_date')||name==='registration_deadline'?localDate(payload[name]):payload[name]||''])));
+    const [error,setError]=useState('');
+    const field=(name,label,options)=> <label className="work-label" key={name}>{label}{options?
+      <select className="form-input" aria-label={label} value={draft[name]} disabled={busy} onChange={event=>setDraft(d=>({...d,[name]:event.target.value}))}><option value="">Not confirmed</option>{options.map(([value,text])=><option key={value} value={value}>{text}</option>)}</select>:
+      name==='description'?<textarea className="form-input" aria-label={label} value={draft[name]} maxLength={5000} disabled={busy} onChange={event=>setDraft(d=>({...d,[name]:event.target.value}))}/>:<input className="form-input" aria-label={label} type={name.endsWith('_date')||name==='registration_deadline'?'datetime-local':name==='registration_url'?'url':'text'} value={draft[name]} maxLength={name==='registration_url'?500:name==='description'?5000:name==='title'?180:200} disabled={busy} onChange={event=>setDraft(d=>({...d,[name]:event.target.value}))}/>}</label>;
+    async function submit(event){
+      event.preventDefault();setError('');const details={...draft};
+      for(const name of ['event_start_date','event_end_date','registration_deadline']){
+        if(!details[name])details[name]=null;
+        else if(Number.isNaN(new Date(details[name]).getTime())){setError('Enter a valid date and time.');return;}
+        else details[name]=new Date(details[name]).toISOString();
+      }
+      await onSave(details);
+    }
+    return <details className="live-change-summary university-review-details"><summary>Confirm announcement details</summary>
+      <p className="work-item-copy">Publisher: {candidate.payload?.university_publisher||candidate.source_name}. This does not establish the host. Read the original announcement and add a review note explaining your evidence.</p>
+      <p className="small-note">Times below use your timezone: {Intl.DateTimeFormat().resolvedOptions().timeZone}. The announcement publication date is not the event date.</p>
+      <form onSubmit={submit} className="page-form">
+        <div className="form-grid">{field('title','Confirmed title')}{field('description','Confirmed description')}{field('competition_category','Competition category',DATA.categories.filter(c=>c.id!=='all').map(c=>[c.id,c.name]))}{field('event_start_date','Confirmed event start')}{field('event_end_date','Confirmed event end (optional)')}{field('registration_deadline','Confirmed registration deadline (optional)')}{field('organizer_name','Confirmed organizer')}{field('host_organization','Confirmed host organization')}{field('host_type','Confirmed host type',[['university','University-hosted'],['outside_university','Outside university']])}{field('university_name','Hosting university name')}{field('event_mode','Confirmed event format',[['online','Online'],['in_person','On-site'],['hybrid','Hybrid']])}{field('location','Confirmed location')}{field('registration_url','Confirmed registration link')}</div>
+        <label className="work-label">Confirmed eligibility (optional)<textarea className="form-input" aria-label="Confirmed eligibility (optional)" rows={2} maxLength={5000} value={draft.eligibility} disabled={busy} onChange={event=>setDraft(d=>({...d,eligibility:event.target.value}))}/></label>
+        {error&&<Notice error>{error}</Notice>}
+        <button className="button-secondary" type="submit" disabled={busy}>Save verified details</button>
+      </form></details>;
+  }
+  function FacebookConnections({revision,onChanged}) {
+    const [state,setState]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+    useEffect(()=>{let active=true;requestApi('/discovery/facebook/').then(data=>{if(active)setState(data);}).catch(()=>{if(active)setError('Facebook connection settings could not be loaded.');});return()=>{active=false;};},[revision]);
+    async function action(path,method,body={}){setBusy(true);setError('');try{const result=await requestApi(path,{method,body});if(result.url){window.location.assign(result.url);return;}onChanged();}catch(e){setError(typeof e.data?.detail==='string'?e.data.detail:Array.isArray(e.data)?e.data.join(' '):e.message);}finally{setBusy(false);}}
+    return <Panel title="Facebook Pages" icon="layoutgrid">
+      <p className="work-item-copy">Connect Pages you are authorized to manage. New connections start paused. Enable a Page here, then enable the Facebook source below to collect its competition posts.</p>
+      {error&&<Notice error>{error}</Notice>}
+      {!state?<p>Loading Facebook connection status…</p>:<>
+        {!state.configured&&<Notice>{state.setup_message}</Notice>}
+        <button className="button-primary" disabled={busy||!state.configured} onClick={()=>action('/discovery/facebook/connect/','POST')}>Connect Facebook Pages ↗</button>
+        {!state.pages.length&&<p className="small-note">No Facebook Pages connected yet. Organizers can still suggest individual post links through Submit Competition.</p>}
+        {state.pages.map(page=><ListItem key={page.id} title={page.name} subtitle={'Page ID: '+page.page_id} badge={page.enabled?'Enabled':'Paused'}>
+          {page.last_error&&<Notice error>{page.last_error}</Notice>}
+          <div className="work-item-actions"><button className="button-secondary" disabled={busy||(!state.configured&&!page.enabled)} onClick={()=>action('/discovery/facebook/pages/'+page.id+'/','PATCH',{enabled:!page.enabled})}>{page.enabled?'Pause Page':'Enable Page'}</button><button className="work-text-button" disabled={busy} onClick={()=>action('/discovery/facebook/pages/'+page.id+'/','DELETE')}>Disconnect Page</button></div>
+        </ListItem>)}
+        <p className="small-note">Only authorized Page posts are collected. Groups, personal profiles and image-only competition details are not automatically read. Every Facebook announcement needs staff verification.</p>
+      </>}
+    </Panel>;
+  }
+
   function LiveImports() {
     const [section,setSection]=useState('sources'),[filter,setFilter]=useState('pending'),[revision,setRevision]=useState(0);
+    const [reviewSource,setReviewSource]=useState('all');
     const [state,setState]=useState({status:'loading',sources:[],candidates:[],runs:[],error:''});
     const [busy,setBusy]=useState(''),[feedback,setFeedback]=useState(null),[notes,setNotes]=useState({});
     const backendOrigin='http://'+(window.location.hostname==='localhost'?'localhost':'127.0.0.1')+':8001';
@@ -803,20 +967,24 @@ window.createTalentSphereWorkspaces = function ({
       try{const url=new URL(value);return ['https:','http:'].includes(url.protocol)?url.href:null;}catch{return null;}
     }
     function errorText(error) {
+      if(Array.isArray(error.data))return error.data.map(valueText).join(' · ');
       const fields=Object.entries(error.data||{}).filter(([key])=>!['detail','run'].includes(key)).map(([key,value])=>(fieldLabels[key]||key.replace(/_/g,' '))+': '+valueText(value));
       return fields.length?fields.join(' · '):error.message||'The import service could not complete this request.';
     }
     useEffect(()=>{
       let active=true;
       setState(s=>({...s,status:'loading',error:''}));
-      const query=filter==='all'?'':'?status='+encodeURIComponent(filter);
+      const queryParts=new URLSearchParams();
+      if(filter!=='all')queryParts.set('status',filter);
+      if(reviewSource!=='all')queryParts.set('source',reviewSource);
+      const query=queryParts.size?'?'+queryParts.toString():'';
       Promise.all([requestApi('/discovery/sources/'),requestApi('/discovery/candidates/'+query),requestApi('/discovery/runs/')]).then(([sources,candidates,runs])=>{
         if(active)setState({status:'ready',sources:asRows(sources),candidates:asRows(candidates),runs:asRows(runs),error:''});
       }).catch(error=>{
         if(active)setState(s=>({...s,status:error.status===401||error.status===403?'forbidden':'error',error:errorText(error)}));
       });
       return()=>{active=false;};
-    },[filter,revision]);
+    },[filter,reviewSource,revision]);
     async function mutate(key,path,body,success) {
       if(busy)return;
       setBusy(key);setFeedback(null);
@@ -830,8 +998,9 @@ window.createTalentSphereWorkspaces = function ({
       }finally{setBusy('');}
     }
     function review(candidate,action) {
-      const review_notes=(notes[candidate.id]||'').trim();
+      const review_notes=(notes[candidate.id]??candidate.review_notes??'').trim();
       if(action==='reject'&&!review_notes){setFeedback({error:true,text:'Add a review note before rejecting this imported competition.'});return;}
+      if(candidate.requires_verification&&!review_notes){setFeedback({error:true,text:'Add a review note explaining how you verified the announcement details.'});return;}
       const success=action==='approve'?'Competition approved. It is now available in the public directory.':action==='apply_update'?'Source updates applied to the competition.':'Imported competition rejected.';
       mutate('candidate-'+candidate.id,'/discovery/candidates/'+candidate.id+'/',{action,review_notes},success);
     }
@@ -842,19 +1011,33 @@ window.createTalentSphereWorkspaces = function ({
     </Panel>;
     if(state.status==='error')return <Panel title="Import service unavailable" icon="info"><Notice error>{state.error}</Notice><p className="live-import-intro">Start the Django backend on port 8001 and check its configuration.</p><button className="button-secondary" onClick={()=>setRevision(r=>r+1)}>Try again</button></Panel>;
     return <>
-      <div className="live-import-heading"><div><span className="live-service-badge"><span/>LIVE DATABASE CONTROLS</span><p>Codeforces uses its official public API. Facebook and other source types require a supported connector and authorization before collection can be enabled.</p></div>
+      <div className="live-import-heading"><div><span className="live-service-badge"><span/>LIVE DATABASE CONTROLS</span><p>Official sources include Codeforces, AtCoder, MLH and Bangladesh universities listed below, including BUET, RUET, Dhaka University, Khulna University and GSTU Gopalganj. University announcements always require staff verification. Facebook requires an authorized connection.</p></div>
         <button className="button-secondary" disabled={!!busy||state.status==='loading'} onClick={()=>setRevision(r=>r+1)}>Refresh</button>
       </div>
       {feedback&&<div className="workspace-feedback"><Notice error={feedback.error}>{feedback.text}</Notice><button aria-label="Dismiss import update" onClick={()=>setFeedback(null)}>×</button></div>}
       <div className="page-tabs live-import-tabs" role="group" aria-label="Live import sections">{[['sources','Sources'],['review','Review queue'],['history','Run history']].map(([id,label])=><button key={id} aria-pressed={section===id} className={section===id?'active':''} onClick={()=>setSection(id)}>{label}{id==='review'&&state.status==='ready'&&<span>{state.candidates.length}</span>}</button>)}</div>
       {state.status==='loading'&&<div className="live-import-loading" role="status"><Icon name="clock" className="w-5 h-5"/>Loading current source, review, and run records…</div>}
       {state.status==='ready'&&section==='sources'&&<>
+        <p className="live-import-intro">Enabled sources are eligible for collection. Automatic checks require a running background worker; this page does not start or monitor that process. Check attempt times, results and errors below to assess collection evidence.</p>
+        <FacebookConnections revision={revision} onChanged={()=>setRevision(r=>r+1)}/>
         <Panel title="Your active discovery network" icon="layoutgrid">
           {!state.sources.length&&<EmptyState title="No sources configured yet" text="Run the Django discovery bootstrap command or add supported source records in Django Admin."/>}
           {state.sources.map(source=>{
-            const supported=source.can_run!==false&&source.connector==='codeforces';
-            return <ListItem key={source.id} title={source.name} subtitle={source.connector==='codeforces'?'Official Codeforces contest feed':source.connector==='facebook'?'Facebook · authorization required':source.connector} badge={!supported?'Unavailable':source.enabled?'Enabled':'Paused'}>
+            const supported=source.can_run===true;
+            return <ListItem key={source.id} title={source.name} subtitle={source.university_publisher||({'codeforces':'Official Codeforces contest API','atcoder':'Official AtCoder upcoming and daily contest schedule','mlh':'Official MLH student hackathon season schedule','facebook':'Facebook · authorization required'})[source.connector]||source.connector} badge={!supported?'Unavailable':source.enabled?'Enabled':'Paused'}>
+              {!!source.source_urls?.length&&<div className="university-source-links">{source.source_urls.map((url,index)=><a className="inline-link" key={url} href={safeLink(url)} target="_blank" rel="noopener noreferrer">Official university source{source.source_urls.length>1?' '+(index+1):''} ↗</a>)}</div>}
               <div className="live-source-details"><div><span>Last checked</span><strong>{date(source.last_checked_at)}</strong></div><div><span>Publication</span><strong>{source.auto_publish?'New listings publish automatically':'New listings wait for review'}</strong></div></div>
+              <dl className="import-facts source-health" aria-label={'Source health for '+source.name}>{[
+                ['Health',source.health?.label||'Not checked'],['Last attempted',date(source.health?.last_attempt_at)],
+                ['Last successful',date(source.health?.last_success_at)],['Last failed',date(source.health?.last_failure_at)],
+                ['Next eligible check',date(source.health?.next_eligible_at)],['Consecutive failures',source.health?.consecutive_failures??0],
+                ['Pending review',source.health?.pending_count??0],['Approved',source.health?.approved_count??0],
+                ['Rejected',source.health?.rejected_count??0],['Total runs',source.health?.total_run_count??0],
+                ['Total candidates',source.health?.candidate_count??0],['Possible duplicates',source.health?.possible_duplicate_count??0],
+                ['Last successful new',source.health?.last_success_created_count??'No success'],['Last successful updated',source.health?.last_success_updated_count??'No success'],
+                ['Last successful unchanged',source.health?.last_success_unchanged_count??'No success'],['Collection evidence',source.health?.collection_evidence||'No completed collection evidence recorded.'],
+                ['Last result',source.health?.last_run_result||'No runs'],['Retry state',source.health?.retry_scheduled?'Waiting for cooldown':'No cooldown']
+              ].map(([label,value])=><div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}</dl>
               {source.last_error&&<div className="import-warning duplicate"><Icon name="info" className="w-4 h-4"/>{source.last_error}</div>}
               {!supported&&<p className="work-item-copy">This source cannot be collected yet. A public Page link alone does not authorize automated Facebook access. No login cookies, passwords, or access tokens should be entered here.</p>}
               <div className="live-source-controls">
@@ -862,10 +1045,10 @@ window.createTalentSphereWorkspaces = function ({
                   {[15,30,60,180,360,720,1440].map(minutes=><option key={minutes} value={minutes}>{minutes<60?minutes+' minutes':minutes===60?'Every hour':minutes===1440?'Daily':'Every '+minutes/60+' hours'}</option>)}
                   {![15,30,60,180,360,720,1440].includes(source.interval_minutes)&&<option value={source.interval_minutes}>{source.interval_minutes} minutes</option>}
                 </select></label>
-                <label className="live-auto-publish"><input type="checkbox" checked={!!source.auto_publish} disabled={!!busy||!supported} onChange={e=>mutate('source-'+source.id,'/discovery/sources/'+source.id+'/',{auto_publish:e.target.checked},'Publication preference saved for future imports. Existing review decisions are unchanged.')}/><span>Automatically publish new listings from this source</span></label>
+                <label className="live-auto-publish"><input type="checkbox" checked={!!source.auto_publish} disabled={!!busy||!supported||source.review_required} onChange={e=>mutate('source-'+source.id,'/discovery/sources/'+source.id+'/',{auto_publish:e.target.checked},'Publication preference saved for future imports. Existing review decisions are unchanged.')}/><span>{source.review_required?'Staff verification is required for these announcements':'Automatically publish new listings from this source'}</span></label>
               </div>
               <div className="work-item-actions"><button className="button-secondary" disabled={!!busy||!supported} onClick={()=>mutate('source-'+source.id,'/discovery/sources/'+source.id+'/',{enabled:!source.enabled},source.enabled?'Source paused.':'Source enabled.')}>{source.enabled?'Pause source':'Enable source'}</button>
-                <button className="button-primary" disabled={!!busy||!supported||!source.enabled} onClick={()=>mutate('run-'+source.id,'/discovery/sources/'+source.id+'/run/',{},'Collection run recorded. Review its results in Run history.')}>{busy==='run-'+source.id?'Checking source…':'Run now'}</button>
+                <button className="button-primary" disabled={!!busy||!supported||!source.enabled||source.health?.retry_scheduled} onClick={()=>mutate('run-'+source.id,'/discovery/sources/'+source.id+'/run/',{},'Collection run recorded. Review its results in Run history.')}>{busy==='run-'+source.id?'Checking source…':'Run now'}</button>
               </div>
             </ListItem>;
           })}
@@ -873,16 +1056,35 @@ window.createTalentSphereWorkspaces = function ({
         <Panel title="Automatic discovery, accountable publication" icon="shieldcheck"><p>Collection intervals are used by the background worker. Keep new sources in manual review until you trust their data. Missing deadlines, eligibility, prizes, and fees stay unknown; an imported listing is not automatically a verified event.</p><a className="inline-link" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Manage source records in Django Admin ↗</a></Panel>
       </>}
       {state.status==='ready'&&section==='review'&&<Panel title="Imported competitions" icon="eye">
-        <div className="work-panel-actions"><span>{state.candidates.length} candidates in this view</span><select className="form-input" aria-label="Live import review status" value={filter} disabled={!!busy} onChange={e=>setFilter(e.target.value)}>{[['pending','New imports'],['update_pending','Source updates'],['approved','Approved'],['rejected','Rejected'],['all','All statuses']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>
+        <div className="work-panel-actions"><span>{state.candidates.length} candidates in this view</span><select className="form-input" aria-label="Review source" value={reviewSource} disabled={!!busy} onChange={e=>setReviewSource(e.target.value)}><option value="all">All sources</option>{state.sources.map(source=><option key={source.id} value={source.id}>{source.name}</option>)}</select><select className="form-input" aria-label="Live import review status" value={filter} disabled={!!busy} onChange={e=>setFilter(e.target.value)}>{[['pending','New imports'],['update_pending','Source updates'],['approved','Approved'],['rejected','Rejected'],['all','All statuses']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>
         {!state.candidates.length&&<EmptyState title="This review queue is clear" text="Run an enabled source, or choose another review status."/>}
         {state.candidates.map(candidate=>{
-          const payload=candidate.payload||{},changes=Object.entries(candidate.changes||{}),sourceUrl=safeLink(payload.source_url||payload.registration_url),isUpdate=candidate.status==='update_pending';
+          const payload={...candidate.payload,...candidate.review_overrides},changes=Object.entries(candidate.changes||{}),sourceUrl=safeLink(payload.source_url||payload.registration_url),isUpdate=candidate.status==='update_pending';
           return <ListItem key={candidate.id} title={candidate.title||payload.title||'Untitled imported competition'} subtitle={candidate.source_name+' · '+(payload.organizer_name||payload.host_organization||'Organizer not provided')} badge={candidate.status.replace(/_/g,' ')}>
             <p className="work-item-copy">{payload.description||'Description not provided by the source.'}</p>
-            <dl className="import-facts"><div><dt>Start time</dt><dd>{payload.event_start_date?date(payload.event_start_date):'Not provided'}</dd></div><div><dt>Registration deadline</dt><dd>{payload.registration_deadline?date(payload.registration_deadline):'Not provided · check the source'}</dd></div><div><dt>Original announcement</dt><dd>{sourceUrl?<a href={sourceUrl} target="_blank" rel="noopener noreferrer">Open source ↗</a>:'Not provided'}</dd></div></dl>
+            <dl className="import-facts"><div><dt>Start time</dt><dd>{payload.event_start_date?date(payload.event_start_date):'Unknown — staff must confirm a date and time'}</dd></div><div><dt>Registration deadline</dt><dd>{payload.registration_deadline?date(payload.registration_deadline):'Unknown — check the source'}</dd></div><div><dt>Original announcement</dt><dd>{sourceUrl?<a href={sourceUrl} target="_blank" rel="noopener noreferrer">Open source ↗</a>:'Not provided'}</dd></div></dl>
+            {candidate.is_university_source&&<>
+              <p className="small-note">University publisher: {payload.university_publisher||'Unknown'}. Publishing an announcement does not establish the organizer or host.</p>
+              <p className="small-note">Organizer: {payload.organizer_name||'Unknown'} · Host: {payload.host_organization||'Unknown'} · Format: {payload.event_mode||'Unknown'} · Date precision: {payload.date_precision||'Unknown'}</p>
+              {!!candidate.source_urls?.length&&<p className="small-note">Collection listing: {candidate.source_urls.map(url=><a className="inline-link" key={url} href={safeLink(url)} target="_blank" rel="noopener noreferrer">{url} </a>)}</p>}
+              {payload.source_evidence?.dates&&Object.entries(payload.source_evidence.dates).map(([label,evidence])=><p className="import-warning" key={label}>Source date evidence ({label.replace(/_/g,' ')}): {evidence.raw||'Unknown'} · {evidence.precision||'unresolved'}{evidence.reason?' · '+evidence.reason:''}. Date-only evidence is not an approved event time.</p>)}
+              {payload.source_evidence?.attachment_review&&<p className="import-warning">{payload.source_evidence.attachment_review}</p>}
+              {!!payload.source_evidence?.conflicting_labels?.length&&<p className="import-warning">Conflicting source labels: {payload.source_evidence.conflicting_labels.join(', ')}. Resolve these against the original announcement.</p>}
+              {!!payload.source_evidence?.labelled_fields?.length&&<details className="live-change-summary"><summary>Source-stated field evidence — not independent verification</summary><ul>{payload.source_evidence.labelled_fields.map((evidence,index)=><li key={index}>{evidence.field.replace(/_/g,' ')}: {evidence.text}</li>)}</ul></details>}
+            </>}
+            <p className="small-note">Last seen at source: {date(candidate.last_seen_at)} ? Classification: {(candidate.payload.announcement_classification||'Source schedule').replace(/_/g,' ')}</p>
+            <p className="small-note">Missing metadata: {(candidate.missing_metadata||[]).join(', ')||'None in the checked fields'}</p>
+            {candidate.freshness?.map(label=><p className="import-warning" key={label}>{label}</p>)}
+            <details className="live-change-summary"><summary>Source data, last applied version and staff overrides</summary>
+              <h4>Current source data</h4><pre>{JSON.stringify(candidate.payload,null,2)}</pre>
+              <h4>Last applied version</h4><pre>{JSON.stringify(candidate.applied_payload,null,2)}</pre>
+              <h4>Staff-confirmed overrides</h4><pre>{JSON.stringify(candidate.review_overrides,null,2)}</pre>
+            </details>
+            {!!candidate.review_history?.length&&<details className="live-change-summary"><summary>Review decision history ({candidate.review_history.length})</summary><ol>{candidate.review_history.map((entry,index)=><li key={index}>{date(entry.at)} · {entry.action.replace(/_/g,' ')} · Staff #{entry.staff_id??'unknown'}<p>{entry.note||'No note recorded'}</p>{entry.fields?.length>0&&<p>Fields: {entry.fields.join(', ')}</p>}</li>)}</ol></details>}
             {Array.isArray(candidate.warnings)&&candidate.warnings.map((warning,i)=><div className="import-warning duplicate" key={i}><Icon name="info" className="w-4 h-4"/>{valueText(warning)}</div>)}
             {isUpdate&&changes.length>0&&<details className="live-change-summary"><summary>{changes.length} source changes to review</summary><dl>{changes.map(([field,change])=><div key={field}><dt>{fieldLabels[field]||field.replace(/_/g,' ')}</dt><dd>{change&&typeof change==='object'&&!Array.isArray(change)?<><span>Before: {valueText(change.old??change.before)}</span><strong>Source: {valueText(change.new??change.after)}</strong></>:<strong>{valueText(change)}</strong>}</dd></div>)}</dl></details>}
-            {(candidate.status==='pending'||isUpdate)&&<><label className="work-label live-review-note">Review note<textarea className="form-input" aria-label={'Review note for '+(candidate.title||payload.title||candidate.id)} rows={2} maxLength={2000} value={notes[candidate.id]||''} onChange={e=>setNotes(n=>({...n,[candidate.id]:e.target.value}))} placeholder="Explain a rejection or add context for this decision."/></label>
+            {(candidate.status==='pending'||isUpdate)&&<><label className="work-label live-review-note">Review note<textarea className="form-input" aria-label={'Review note for '+(candidate.title||payload.title||candidate.id)} rows={2} maxLength={2000} value={notes[candidate.id]??candidate.review_notes??''} onChange={e=>setNotes(n=>({...n,[candidate.id]:e.target.value}))} placeholder="Explain a rejection or add context for this decision."/></label>
+              {candidate.requires_verification&&<UniversityReviewDetails key={candidate.id+JSON.stringify(candidate.review_overrides)} candidate={candidate} busy={!!busy} onSave={details=>mutate('details-'+candidate.id,'/discovery/candidates/'+candidate.id+'/',{action:'save_details',verified_details:details,review_notes:(notes[candidate.id]??candidate.review_notes??'').trim()},'Verified details saved. Check them before approving publication.')}/>}
               <div className="work-item-actions"><button className="button-primary" disabled={!!busy} onClick={()=>review(candidate,isUpdate?'apply_update':'approve')}>{busy==='candidate-'+candidate.id?'Saving…':isUpdate?'Apply reviewed update':'Approve & publish'}</button><button className="button-secondary" disabled={!!busy} onClick={()=>review(candidate,'reject')}>Reject import</button></div></>}
             {candidate.competition&&<Link className="inline-link" to={'/competitions/'+candidate.competition}>Open linked competition →</Link>}
           </ListItem>;
@@ -903,13 +1105,81 @@ window.createTalentSphereWorkspaces = function ({
     useEffect(()=>setFeedback(null),[tab]);
     const notify=(text,error=false)=>setFeedback({text,error}),props={db,setDb,notify};
     const content={overview:()=> <AdminOverview db={db}/>,approvals:()=> <ApprovalQueue {...props}/>,users:()=> <People {...props}/>,sources:()=> <Sources {...props}/>,
-      imports:()=> <Imports {...props}/>,history:()=> <ImportHistory db={db}/>,rankings:()=> <ResultsReview {...props}/>,fairs:()=> <Fairs {...props}/>};
+      imports:()=> <Imports {...props}/>,history:()=> <ImportHistory db={db}/>,rankings:()=> <ResultsReview {...props}/>,fairs:()=> <window.TalentSquareJobFairUI.Review/>};
     const djangoAdminUrl='http://'+(window.location.hostname==='localhost'?'localhost':'127.0.0.1')+':8001/admin/';
-    return <Shell admin live={tab==='live-imports'} tab={tab} menu={adminMenu} heading={tab==='live-imports'?'Live competition imports':'Preview only · '+(tab==='overview'?'A thriving sphere starts here.':adminMenu.find(([id])=>id===tab)[1])}>
-      {tab!=='live-imports'&&<Notice error>These admin sections use sample data. Use Live imports for the real collector and import review, or Django Admin for organizer submissions. <Link className="inline-link" to={adminRoute('live-imports')}>Open Live imports →</Link><a className="inline-link" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Open Django Admin ↗</a></Notice>}
+    return <Shell admin live={['live-imports','fairs'].includes(tab)} tab={tab} menu={adminMenu} heading={tab==='fairs'?'Job fair review':tab==='live-imports'?'Live competition imports':'Preview only · '+(tab==='overview'?'A thriving sphere starts here.':adminMenu.find(([id])=>id===tab)[1])}>
+      {!['live-imports','fairs'].includes(tab)&&<Notice error>These admin sections use sample data. Use Live imports for the real collector and import review, or Django Admin for organizer submissions. <Link className="inline-link" to={adminRoute('live-imports')}>Open Live imports →</Link><a className="inline-link" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Open Django Admin ↗</a></Notice>}
       {error&&<Notice error>{error}</Notice>}{feedback&&<div className="workspace-feedback"><Notice error={feedback.error}>{feedback.text}</Notice><button aria-label="Dismiss update" onClick={()=>setFeedback(null)}>×</button></div>}
       <div key={tab}>{tab==='live-imports'?<LiveImports/>:content[tab]()}</div>
     </Shell>;
   }
   return { WorkspacePage, AdminPage };
+};
+
+/* Real Job Fair UI shares the existing session/CSRF helper and visual components. */
+window.createTalentSquareJobFairs = function ({Link,Panel,Notice,requestApi}) {
+  const {useState,useEffect}=React;
+  const date=value=>value?new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'Not provided';
+  const errorText=e=>typeof e.data?.detail==='string'?e.data.detail:e.data?JSON.stringify(e.data):e.message;
+  const safe=value=>{try{const u=new URL(value);return ['https:','http:'].includes(u.protocol)&&!u.username&&!u.password?u.href:null;}catch{return null;}};
+  function useData(path,revision=0){
+    const [state,set]=useState({loading:true,data:null,error:null});
+    useEffect(()=>{let active=true;if(!path){set({loading:false,data:null,error:null});return;}
+      set({loading:true,data:null,error:null});requestApi(path).then(data=>{if(active)set({loading:false,data,error:null});}).catch(error=>{if(active)set({loading:false,data:null,error});});return()=>{active=false;};
+    },[path,revision]);return state;
+  }
+  function Status({state}){return state.loading?<p role="status">Loading job fairs…</p>:state.error?<Notice error>{[401,403].includes(state.error.status)?'A signed-in account with the required role or job fair review permissions is needed.':errorText(state.error)} <Link to="/login">Go to login</Link></Notice>:null;}
+  function Pager({data,page,onPage}){return <div className="work-item-actions"><button className="button-secondary" disabled={!data?.previous} onClick={()=>onPage(page-1)}>Previous fairs</button><span>Page {page} · {data?.count??0} records</span><button className="button-secondary" disabled={!data?.next} onClick={()=>onPage(page+1)}>Next fairs</button></div>;}
+  function Card({fair}){return <article className="glass-card rounded-2xl p-6 border border-slate-800"><p className="eyebrow">{fair.event_format} · {fair.attendance_mode==='internal'?'Talent Square registration':'External registration'}</p><h3 className="font-heading font-bold text-xl text-white">{fair.title}</h3><p>{fair.organizer_name}</p><p>{date(fair.start_at)}</p><p>{fair.venue}{fair.city?' · '+fair.city:''}</p><p className="small-note">{fair.registration_open?'Registration open':'Registration closed'}</p><Link className="button-primary" to={'/job-fairs/'+fair.id}>View fair details</Link></article>;}
+  function Directory({home=false}){
+    const [query,setQuery]=useState(''),[city,setCity]=useState(''),[format,setFormat]=useState(''),[from,setFrom]=useState(''),[to,setTo]=useState(''),[ordering,setOrdering]=useState('start_at'),[page,setPage]=useState(1),[retry,setRetry]=useState(0);
+    const params=new URLSearchParams({page:String(page),page_size:home?'3':'12',ordering,timezone:Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Dhaka'});
+    if(query)params.set('search',query);if(city)params.set('city',city);if(format)params.set('event_format',format);if(from)params.set('date_from',from);if(to)params.set('date_to',to);
+    const state=useData('/job-fairs/?'+params,retry),change=setter=>event=>{setter(event.target.value);setPage(1);};
+    return <section id="jobfairs" className="py-20 bg-[#060911] border-t border-slate-800/80"><div className="page-container"><h2 className="font-heading font-black text-3xl text-white">Job fairs</h2><p>Meet organizers at published career events. Attendance registration is not a job application or verified attendance.</p>
+      {!home&&<div className="listing-toolbar"><input className="form-input" aria-label="Search job fairs" placeholder="Search job fairs" value={query} onChange={change(setQuery)}/><input className="form-input" aria-label="Job fair city" placeholder="City" value={city} onChange={change(setCity)}/><select className="form-input" aria-label="Fair format" value={format} onChange={change(setFormat)}><option value="">All formats</option><option value="onsite">On-site</option><option value="online">Online</option><option value="hybrid">Hybrid</option></select><input aria-label="Fairs from date" type="date" value={from} onChange={change(setFrom)}/><input aria-label="Fairs to date" type="date" value={to} onChange={change(setTo)}/><select aria-label="Sort job fairs" className="form-input" value={ordering} onChange={change(setOrdering)}><option value="start_at">Event date</option><option value="-published_at">Recently published</option><option value="title">Title</option><option value="-start_at">Latest event date</option></select></div>}
+      <Status state={state}/>{state.error&&<button className="button-secondary" onClick={()=>setRetry(r=>r+1)}>Retry job fairs</button>}
+      {state.data&&<><div className="grid grid-cols-1 lg:grid-cols-3 gap-6">{state.data.results.map(fair=><Card key={fair.id} fair={fair}/>)}</div>{!state.data.results.length&&<p>No published job fairs found.</p>}{home?<Link className="inline-link" to="/job-fairs">Browse all job fairs →</Link>:<Pager data={state.data} page={page} onPage={setPage}/>}</>}
+    </div></section>;
+  }
+  function Detail({id}){
+    const [revision,setRevision]=useState(0),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
+    const fair=useData('/job-fairs/'+encodeURIComponent(id)+'/'),account=useData('/auth/me/');
+    const participant=account.data?.role==='participant';const activity=useData(participant?'/participant/job-fairs/'+encodeURIComponent(id)+'/activity/':null,revision);
+    async function act(path,method,success){if(busy)return;setBusy(true);setMessage('');try{await requestApi(path,{method,body:{}});setMessage(success);setRevision(r=>r+1);}catch(e){setMessage(errorText(e));}finally{setBusy(false);}}
+    if(fair.loading)return <div className="page-container"><Status state={fair}/></div>;
+    if(fair.error)return <div className="page-container"><h1>{fair.error.status===404?'Job fair not found':'Job fair unavailable'}</h1><Status state={fair}/></div>;
+    const f=fair.data,r=activity.data?.registration;
+    return <div className="page-container py-20"><Link className="inline-link" to="/job-fairs">All job fairs</Link><h1 className="font-heading font-black text-4xl text-white">{f.title}</h1><p>{f.organizer_name}</p><div className="detail-layout"><div className="detail-main"><Panel title="About this job fair"><p style={{whiteSpace:'pre-wrap'}}>{f.description}</p><p>Eligibility: {f.eligibility}</p><p>{f.university}</p>{safe(f.official_website_url)&&<a className="inline-link" href={safe(f.official_website_url)} target="_blank" rel="noopener noreferrer">Official event website ↗</a>}</Panel><Panel title="Event details"><p>Starts: {date(f.start_at)}</p><p>Ends: {date(f.end_at)}</p><p>Venue: {f.venue} · {f.city} · {f.event_format}</p><p>Registration deadline: {date(f.registration_deadline)}</p></Panel></div><aside className="detail-sidebar"><Panel title="Attendance registration"><p>Mode: {f.attendance_mode}</p><p>{f.registration_open?'Registration open':'Registration closed'}</p><p className="small-note">This records interest or planned attendance. It is not verified attendance, recruitment or a job application.</p>
+      {f.attendance_mode==='external'&&safe(f.external_registration_url)&&<><a data-job-fair-external className="button-primary" href={safe(f.external_registration_url)} target="_blank" rel="noopener noreferrer">Official external registration ↗</a><p className="small-note">Opening this link does not register you on Talent Square or confirm external registration.</p></>}
+      {!participant?<p><Link to="/login">Sign in as a Participant</Link> to save a fair or register internally.</p>:<><Status state={activity}/>{activity.data&&<><button className="button-secondary" disabled={busy} onClick={()=>act('/participant/job-fairs/'+f.id+'/bookmark/',activity.data.bookmarked?'DELETE':'POST',activity.data.bookmarked?'Job fair removed from saved items.':'Job fair saved.')}>{activity.data.bookmarked?'Unsave job fair':'Save job fair'}</button>
+      {f.attendance_mode==='internal'&&(r?<><p>{r.status==='active'?'Registered on Talent Square':'Registration withdrawn'}</p>{r.status==='active'&&new Date(f.start_at)>new Date()&&<button className="button-secondary" disabled={busy} onClick={()=>{if(window.confirm('Withdraw your job fair registration? History will be retained.'))act('/participant/job-fair-registrations/'+r.id+'/withdraw/','POST','Job fair registration withdrawn. History retained.');}}>Withdraw job fair registration</button>}</>:<button className="button-primary" disabled={busy||!f.registration_open} onClick={()=>act('/participant/job-fairs/'+f.id+'/register/','POST','Registered on Talent Square. This is not verified attendance.')}>Register attendance</button>)}</>}</>}
+      {message&&<p role="status">{message}</p>}</Panel></aside></div></div>;
+  }
+  function Participant(){
+    const [revision,setRevision]=useState(0),[bp,setBp]=useState(1),[rp,setRp]=useState(1),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
+    const saved=useData('/participant/job-fair-bookmarks/?page='+bp,revision),registrations=useData('/participant/job-fair-registrations/?page='+rp,revision);
+    async function action(path,method){setBusy(true);try{await requestApi(path,{method,body:{}});setMessage('Job fair activity updated; registration history retained.');setRevision(r=>r+1);}catch(e){setMessage(errorText(e));}finally{setBusy(false);}}
+    return <><p>Job fair attendance is separate from competition activity and job applications.</p>{message&&<Notice>{message}</Notice>}<Panel title="Saved job fairs"><Status state={saved}/>{saved.data&&<>{saved.data.results.map(row=><article className="work-list-item" key={row.id}><Card fair={row.job_fair}/><button className="button-secondary" disabled={busy} onClick={()=>action('/participant/job-fairs/'+row.job_fair.id+'/bookmark/','DELETE')}>Remove saved fair</button></article>)}{!saved.data.results.length&&<p>No saved job fairs.</p>}<Pager data={saved.data} page={bp} onPage={setBp}/></>}</Panel><Panel title="My job fair registrations"><Status state={registrations}/>{registrations.data&&<>{registrations.data.results.map(row=><article className="work-list-item" key={row.id}><h3>{row.job_fair.title}</h3><p>{date(row.job_fair.start_at)} · {row.job_fair.venue} · {row.job_fair.city}</p><p>{row.job_fair.attendance_mode} · {row.status} · Fair: {row.fair_status}</p><Link to={'/job-fairs/'+row.job_fair.id}>View fair</Link>{row.status==='active'&&new Date(row.job_fair.start_at)>new Date()&&<button className="button-secondary" disabled={busy} onClick={()=>{if(window.confirm('Withdraw this job fair registration?'))action('/participant/job-fair-registrations/'+row.id+'/withdraw/','POST');}}>Withdraw job fair registration</button>}{row.withdrawn_at&&<p>Withdrawn: {date(row.withdrawn_at)}</p>}</article>)}{!registrations.data.results.length&&<p>No job fair registrations.</p>}<Pager data={registrations.data} page={rp} onPage={setRp}/></>}</Panel></>;
+  }
+  const fields=[['title','Fair title'],['description','Fair description'],['venue','Fair venue'],['city','Fair city'],['university','Fair university'],['eligibility','Fair eligibility'],['official_website_url','Official website'],['external_registration_url','External registration URL']];
+  const localDate=value=>{if(!value)return '';const d=new Date(value);return new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);};
+  function Editor({fair,onSaved,onCancel}){
+    const [values,setValues]=useState(()=>({...Object.fromEntries(fields.map(([name])=>[name,fair?.[name]||''])),event_format:fair?.event_format||'onsite',attendance_mode:fair?.attendance_mode||'internal',...Object.fromEntries(['start_at','end_at','registration_deadline'].map(name=>[name,localDate(fair?.[name])]))})),[busy,setBusy]=useState(false),[error,setError]=useState('');
+    const change=e=>setValues(v=>({...v,[e.target.name]:e.target.value}));
+    async function save(e){e.preventDefault();setBusy(true);setError('');try{const body={...values};for(const name of ['start_at','end_at','registration_deadline'])body[name]=body[name]?new Date(body[name]).toISOString():null;const result=await requestApi('/organizer/job-fairs/'+(fair?fair.id+'/':''),{method:fair?'PATCH':'POST',body});onSaved(result);}catch(e){setError(errorText(e));}finally{setBusy(false);}}
+    return <Panel title={fair?'Edit job fair draft':'New job fair draft'}><form onSubmit={save}>{fields.map(([name,label])=><label className="form-field" key={name}><span>{label}</span>{['description','eligibility'].includes(name)?<textarea className="form-input" aria-label={label} name={name} value={values[name]} onChange={change}/>:<input className="form-input" aria-label={label} name={name} value={values[name]} onChange={change}/>}</label>)}{['start_at','end_at','registration_deadline'].map(name=><label className="form-field" key={name}>{name.replace(/_/g,' ')}<input className="form-input" aria-label={name} type="datetime-local" name={name} value={values[name]} onChange={change}/></label>)}<label>Format<select className="form-input" aria-label="Fair event format" name="event_format" value={values.event_format} onChange={change}>{['onsite','online','hybrid'].map(x=><option key={x} value={x}>{x}</option>)}</select></label><label>Attendance<select className="form-input" aria-label="Fair attendance mode" name="attendance_mode" value={values.attendance_mode} onChange={change}><option value="internal">Internal</option><option value="external">External</option></select></label>{error&&<Notice error>{error}</Notice>}<div className="work-item-actions"><button className="button-primary" disabled={busy}>Save job fair draft</button><button className="button-secondary" type="button" onClick={onCancel}>Cancel edit</button></div></form></Panel>;
+  }
+  function Registrants({id}){const [page,setPage]=useState(1),state=useData('/organizer/job-fairs/'+id+'/registrations/?page='+page);return <Panel title="Job fair registrants"><p className="small-note">Only participant references, registration status and timestamps are shared. No private profile/contact fields.</p><Status state={state}/>{state.data&&<>{state.data.results.map(row=><p key={row.id}>{row.participant_label} · {row.status} · {date(row.registered_at)}{row.withdrawn_at?' · Withdrawn '+date(row.withdrawn_at):''}</p>)}{!state.data.results.length&&<p>No registrations yet.</p>}<Pager data={state.data} page={page} onPage={setPage}/></>}</Panel>;}
+  function Organizer(){
+    const [page,setPage]=useState(1),[revision,setRevision]=useState(0),[editor,setEditor]=useState(null),[selected,setSelected]=useState(null),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),state=useData('/organizer/job-fairs/?page='+page,revision);
+    async function submit(fair){setBusy(true);try{await requestApi('/organizer/job-fairs/'+fair.id+'/submit/',{method:'POST',body:{}});setMessage('Job fair submitted for staff review.');setRevision(r=>r+1);}catch(e){setMessage(errorText(e));}finally{setBusy(false);}}
+    return <><Status state={state}/>{message&&<Notice>{message}</Notice>}{state.data&&<><button className="button-primary" onClick={()=>setEditor({new:true})}>Create job fair</button>{editor&&<Editor key={editor.id||'new'} fair={editor.new?null:editor} onCancel={()=>setEditor(null)} onSaved={()=>{setEditor(null);setMessage('Job fair draft saved. Submit it when ready.');setRevision(r=>r+1);}}/>}<Panel title="My job fairs">{state.data.results.map(f=><article className="work-list-item" data-fair-id={f.id} key={f.id}><h3>{f.title||'Untitled draft'}</h3><p>{f.status} · {date(f.start_at)} · {f.attendance_mode}</p>{f.reviewer_note&&<p>Reviewer note: {f.reviewer_note}</p>}{['draft','rejected'].includes(f.status)&&<div className="work-item-actions"><button className="button-secondary" disabled={busy} onClick={()=>setEditor(f)}>Edit job fair</button><button className="button-primary" disabled={busy} onClick={()=>submit(f)}>Submit job fair for review</button></div>}{f.status==='published'&&<Link to={'/job-fairs/'+f.id}>View published fair</Link>}{f.attendance_mode==='internal'&&<button className="button-secondary" onClick={()=>setSelected(f.id)}>View job fair registrants</button>}</article>)}{!state.data.results.length&&<p>No job fair drafts yet.</p>}<Pager data={state.data} page={page} onPage={setPage}/></Panel>{selected&&<Registrants key={selected} id={selected}/>}</>}</>;
+  }
+  function Review(){
+    const [filter,setFilter]=useState('pending_review'),[page,setPage]=useState(1),[revision,setRevision]=useState(0),[notes,setNotes]=useState({}),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),state=useData('/job-fair-review/?status='+filter+'&page='+page,revision);
+    async function decide(fair,action){setBusy(true);try{await requestApi('/job-fair-review/'+fair.id+'/',{method:'PATCH',body:{action,note:notes[fair.id]||''}});setMessage('Job fair decision recorded: '+action);setRevision(r=>r+1);}catch(e){setMessage(errorText(e));}finally{setBusy(false);}}
+    return <Panel title="Job fair review"><p>Separate from competition import review. Check organizer details, dates and external links before publication.</p><select className="form-input" aria-label="Job fair review status" value={filter} onChange={e=>{setFilter(e.target.value);setPage(1);}}>{['pending_review','published','rejected','cancelled','all'].map(x=><option key={x} value={x}>{x}</option>)}</select><Status state={state}/>{message&&<Notice>{message}</Notice>}{state.data&&<>{state.data.results.map(f=><article className="work-list-item" data-fair-id={f.id} key={f.id}><h3>{f.title}</h3><p>{f.organizer_name} · {f.status}</p><p>{f.description}</p><p>{date(f.start_at)} — {date(f.end_at)} · Deadline {date(f.registration_deadline)}</p><p>{f.venue} · {f.city} · {f.university} · {f.event_format}</p><p>Eligibility: {f.eligibility} · {f.attendance_mode}</p>{safe(f.external_registration_url)&&<a className="inline-link" target="_blank" rel="noopener noreferrer" href={safe(f.external_registration_url)}>Inspect external registration ↗</a>}<textarea className="form-input" aria-label={'Job fair review note '+f.id} value={notes[f.id]||''} onChange={e=>setNotes(n=>({...n,[f.id]:e.target.value}))}/>{f.status==='pending_review'&&<div className="work-item-actions"><button className="button-primary" disabled={busy} onClick={()=>decide(f,'approve')}>Approve job fair</button><button className="button-secondary" disabled={busy} onClick={()=>decide(f,'reject')}>Reject job fair</button></div>}{f.status==='published'&&<button className="button-secondary" disabled={busy} onClick={()=>decide(f,'cancel')}>Cancel published job fair</button>}<details><summary>Job fair publication history ({f.reviews.length})</summary>{f.reviews.map(r=><p key={r.id}>{r.action} · {date(r.created_at)} · {r.note}</p>)}</details></article>)}{!state.data.results.length&&<p>No job fairs in this review state.</p>}<Pager data={state.data} page={page} onPage={setPage}/></>}</Panel>;
+  }
+  return {Directory,Home:()=> <Directory home/>,Detail,Participant,Organizer,Review};
 };

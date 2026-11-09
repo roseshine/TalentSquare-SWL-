@@ -1,0 +1,98 @@
+{
+  "users": [
+    {
+      "id": "usr_demo_1",
+      "role": "participant",
+      "name": "Sarah Khan",
+      "email": "sarah.khan@example.com",
+      "passwordHash": "hashed_pass123",
+      "status": "University Student",
+      "institution": "University of Dhaka",
+      "availability": [
+        "Available for Job Opportunities",
+        "Available for Internships"
+      ],
+      "github": "https://github.com/sarahkhan-dev",
+      "linkedin": "https://linkedin.com/in/sarahkhan",
+      "createdAt": "2026-09-01T10:00:00Z"
+    },
+    {
+      "id": "usr_demo_2",
+      "role": "organizer",
+      "orgName": "DevSphere Bangladesh",
+      "email": "contact@devsphere.org",
+      "passwordHash": "hashed_pass123",
+      "organizerType": "Company / Corporate Organization",
+      "affiliation": "Not Affiliated with an Institution",
+      "institutionName": "",
+      "website": "https://devsphere.org",
+      "createdAt": "2026-08-15T12:00:00Z"
+    },
+    {
+      "id": "usr_demo_3",
+      "role": "recruiter",
+      "companyName": "TechNova Solutions",
+      "recruiterName": "Alex Rahman",
+      "officialEmail": "alex@technova.io",
+      "passwordHash": "hashed_pass123",
+      "companyWebsite": "https://technova.io",
+      "companyDescription": "Fast-growing AI and FinTech infrastructure platform looking for top problem solvers.",
+      "createdAt": "2026-08-20T14:30:00Z"
+    },
+    {
+      "id": "usr_part_1790047277",
+      "role": "participant",
+      "createdAt": "2026-09-22T09:21:17.580117",
+      "name": "Tanvir Ahmed",
+      "email": "tanvir@buet.ac.bd",
+      "passwordHash": "hash_13_sec",
+      "status": "University Student",
+      "institution": "BUET",
+      "github": "https://github.com/tanvir-buet",
+      "linkedin": "https://linkedin.com/in/tanvir-buet",
+      "availability": [
+        "Available for Job Opportunities",
+        "Available for Internships"
+      ]
+    },
+    {
+      "id": "usr_orga_1790047474",
+      "role": "organizer",
+      "createdAt": "2026-09-22T09:24:34.091918",
+      "orgName": "DU Coding Club",
+      "email": "club@du.ac.bd",
+      "organizerType": "University",
+      "affiliation": "Affiliated with an Institution",
+      "institutionName": "University of Dhaka",
+      "website": "https://du.ac.bd/club",
+      "passwordHash": "hash_13_sec"
+    },
+    {
+      "id": "usr_recr_1790047593",
+      "role": "recruiter",
+      "createdAt": "2026-09-22T09:26:33.154158",
+      "companyName": "Apex AI Labs",
+      "recruiterName": "Zubair Hossain",
+      "officialEmail": "recruiting@apexailabs.io",
+      "companyWebsite": "https://apexailabs.io",
+      "companyDescription": "Leading generative models and autonomous agents startup based in Silicon Valley and Dhaka.",
+      "passwordHash": "hash_13_sec"
+    }
+  ],
+  "submissions": [
+    {
+      "id": "comp_sub_1790047833",
+      "title": "National ICPC Warmup 2026",
+      "organizer": "BUET ACM Chapter",
+      "category": "competitive-programming",
+      "type": "Speed Coding",
+      "prizePool": ",000 USD",
+      "deadline": "2026-11-20",
+      "location": "Dhaka",
+      "description": "A standard 5-hour ICPC format preliminary contest for all university engineering students.",
+      "status": "Under Review",
+      "submittedAt": "2026-09-22T09:30:33.855473"
+    }
+  ],
+  "reset_tokens": []
+}

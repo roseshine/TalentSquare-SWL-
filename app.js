@@ -24,11 +24,13 @@ function mapCompetitionRecord(record) {
     date: date(record.event_start_date),
     deadline: record.registration_deadline,
     registrationUrl: record.registration_url,
+    registrationMode: record.registration_mode || 'external',
     sourceUrl: record.source_url,
     submissionSource: record.submission_source,
     sourceName: record.source_name,
     importedAt: record.imported_at,
     sourceCheckedAt: record.source_checked_at,
+    sourceFreshness: record.source_freshness || [],
     eligibility: record.eligibility,
     teamSize: record.team_size,
     prizePool: record.prize_pool,
@@ -515,7 +517,7 @@ const ExploreCompetitionsSection = ({ onSelectContest }) => {
 
   useEffect(() => {
     const controller = new AbortController();
-    const params = new URLSearchParams({ page_size: '3', ordering: 'recent' });
+    const params = new URLSearchParams({ page_size: '3', ordering: 'recent', registration_status: 'Upcoming' });
     if (activeCategory !== 'all') params.set('category', activeCategory);
     if (searchQuery.trim()) params.set('search', searchQuery.trim());
     getCompetitionPage(params, controller.signal).then(result => {
@@ -701,18 +703,12 @@ const ExploreCompetitionsPage = ({ onSelectContest, onOpenSubmit }) => {
   const [source, setSource] = useState('all');
   const [university, setUniversity] = useState('all');
   const [mode, setMode] = useState('all');
-  const [status, setStatus] = useState('all');
+  const [status, setStatus] = useState('Upcoming');
   const [fee, setFee] = useState('all');
   const [dateRange, setDateRange] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
   const [sortBy, setSortBy] = useState('deadline');
-  const [savedIds, setSavedIds] = useState(() => {
-    try { const stored = JSON.parse(localStorage.getItem('talentsphere-saved') || '[]'); return Array.isArray(stored) ? stored : []; }
-    catch { return []; }
-  });
-  const [saveError, setSaveError] = useState('');
-
   function changeFilter(setter, value) { setter(value); setPage(1); }
 
   useEffect(() => {
@@ -730,7 +726,8 @@ const ExploreCompetitionsPage = ({ onSelectContest, onOpenSubmit }) => {
     if (fee !== 'all') params.set('registration_fee', fee);
 
     const today = new Date();
-    const isoDate = value => value.toISOString().slice(0, 10);
+    const isoDate = value => [value.getFullYear(), String(value.getMonth()+1).padStart(2,'0'), String(value.getDate()).padStart(2,'0')].join('-');
+    params.set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
     if (dateRange === 'custom') {
       if (dateFrom) params.set('date_from', dateFrom);
       if (dateTo) params.set('date_to', dateTo);
@@ -814,17 +811,7 @@ const ExploreCompetitionsPage = ({ onSelectContest, onOpenSubmit }) => {
 
   function clearFilters() {
     setQuery(''); setCategory('all'); setSource('all'); setUniversity('all'); setMode('all');
-    setStatus('all'); setFee('all'); setDateRange('all'); setDateFrom(''); setDateTo(''); setSortBy('deadline'); setPage(1);
-    setSaveError('');
-  }
-  function toggleSaved(id) {
-    try {
-      const current = JSON.parse(localStorage.getItem('talentsphere-saved') || '[]');
-      const list = Array.isArray(current) ? current : [];
-      const next = savedIds.includes(id) ? list.filter(item => item !== id) : [...new Set([...list, id])];
-      localStorage.setItem('talentsphere-saved', JSON.stringify(next));
-      setSavedIds(next); setSaveError('');
-    } catch { setSaveError('This browser could not save the competition.'); }
+    setStatus('Upcoming'); setFee('all'); setDateRange('all'); setDateFrom(''); setDateTo(''); setSortBy('deadline'); setPage(1);
   }
   const activeChips = [];
   if (query.trim()) activeChips.push({ label: `Search: ${query.trim()}`, clear: () => changeFilter(setQuery, '') });
@@ -930,6 +917,7 @@ const ExploreCompetitionsPage = ({ onSelectContest, onOpenSubmit }) => {
                   <div className="competition-card-topline"><span className="competition-category-badge">{compCategory?.name || comp.type || 'CSE Competition'}</span><span className={`competition-status-badge status-${currentStatus.toLowerCase().replace(/[^a-z]+/g, '-')}`}>{currentStatus}</span></div>
                   <span className="competition-sample-label"><Icon name={comp.submissionSource==='imported'?'layoutgrid':'users'} className="w-3 h-3" /> {comp.submissionSource==='imported'?'Imported from '+(comp.sourceName||'external source'):'Organizer listing'}</span>
                   {comp.submissionSource==='imported'&&comp.sourceCheckedAt&&<span className="competition-source-checked">Source checked {new Date(comp.sourceCheckedAt).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}</span>}
+                  {comp.sourceFreshness?.map(label=><span className="competition-source-checked" key={label}>{label}</span>)}
                   <h3>{comp.title || 'Competition title not provided'}</h3>
                   <dl className="competition-card-details">
                     <div><dt>Organizer</dt><dd>{comp.organizer || 'Organizer not provided'}</dd></div>
@@ -941,7 +929,7 @@ const ExploreCompetitionsPage = ({ onSelectContest, onOpenSubmit }) => {
                   </dl>
                   {Array.isArray(comp.tags) && comp.tags.length > 0 && <div className="competition-card-tags">{comp.tags.slice(0, 3).map((tag, index) => <span key={`${tag}-${index}`}>#{tag}</span>)}</div>}
                   <div className="competition-card-actions"><button type="button" className="competition-details-button" onClick={() => onSelectContest(comp)}>View Details</button>
-                    <button type="button" className={`competition-save-button ${savedIds.includes(comp.id) ? 'is-saved' : ''}`} aria-pressed={savedIds.includes(comp.id)} aria-label={savedIds.includes(comp.id) ? `Remove ${comp.title} from saved competitions` : `Save ${comp.title}`} onClick={() => toggleSaved(comp.id)}><Icon name={savedIds.includes(comp.id) ? 'checkcircle2' : 'sparkles'} className="w-4 h-4" /><span>{savedIds.includes(comp.id) ? 'Saved' : 'Save'}</span></button></div>
+                    {window.TalentSquareActivity && React.createElement(window.TalentSquareActivity.BookmarkButton,{id:comp.id,title:comp.title,compact:true})}</div>
                 </article>;
               })}
             </div>}
@@ -950,7 +938,6 @@ const ExploreCompetitionsPage = ({ onSelectContest, onOpenSubmit }) => {
               <span>Page {page} of {totalPages}</span>
               <button type="button" className="button-secondary" disabled={page >= totalPages} onClick={() => setPage(value => Math.min(totalPages, value + 1))}>Next</button>
             </nav>}
-            {saveError && <p role="alert" className="competition-save-error">{saveError}</p>}
           </div>
         </div>
       </div>
