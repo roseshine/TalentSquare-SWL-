@@ -1,0 +1,24 @@
+on_http_request:
+  - expressions:
+      - "req.url.scheme != 'https'"
+    actions:
+      - type: custom-response
+        config:
+          status_code: 403
+          body: HTTPS is required.
+  - actions:
+      - type: basic-auth
+        config:
+          realm: Talent Square HTTPS rehearsal
+          credentials:
+            - "pilot:${secrets.get('talent-square-dev', 'gate-password')}"
+          enforce: true
+      - type: remove-headers
+        config:
+          headers:
+            - authorization
+            - x-talent-square-origin
+      - type: add-headers
+        config:
+          headers:
+            x-talent-square-origin: "${secrets.get('talent-square-dev', 'origin-proof')}"

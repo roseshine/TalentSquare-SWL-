@@ -3,13 +3,12 @@
   const { useState, useEffect } = React;
   const { Icon, Navbar, HeroSection, ExploreCompetitionsSection, ExploreCompetitionsPage, JobFairSection, RankingsSection, Footer } = window.TalentSphereUI;
   const DATA = window.TALENTSPHERE_DATA;
-  const AUTH_HOST = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
-  const AUTH_API = 'http://' + AUTH_HOST + ':8001/api';
+  const AUTH_API = window.TalentSphereUI.apiOrigin + '/api';
   let participantSessionRequest = null;
   let csrfToken = '';
   const SUBMIT_PATH = '/workspace?role=organizer&tab=create';
   const sectionPaths = { hero: '/', competitions: '/competitions', jobfairs: '/job-fairs', rankings: '/rankings', workspace: '/workspace',
-    participant: '/workspace?role=participant', organizer: '/workspace?role=organizer', recruiter: '/workspace?role=recruiter', admin: '/admin' };
+    participant: '/workspace?role=participant', organizer: '/workspace?role=organizer', recruiter: '/workspace?role=recruiter' };
   const authPath = (view) => view === 'login' ? '/login' : view === 'forgot-password' ? '/login?view=recovery' :
     '/signup' + (['participant', 'organizer', 'recruiter'].includes(view) ? '?role=' + view : '');
   const titles = { '/': 'Discover your next opportunity', '/login': 'Login', '/signup': 'Create your account',
@@ -36,24 +35,32 @@
   function readStored(key, fallback) {
     try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; }
   }
-  async function requestApi(path, { method = 'GET', body } = {}) {
+  async function requestApi(path, { method = 'GET', body, signal } = {}) {
     const headers = { Accept: 'application/json' };
     if (body !== undefined) {
-      if (!csrfToken) {
-        const csrfResponse = await fetch(AUTH_API + '/auth/csrf/', { credentials: 'include', headers });
+      // A login in another tab can rotate the shared cookie after a failed attempt.
+      const isLogin = path === '/auth/login/';
+      let token = isLogin ? '' : csrfToken;
+      if (!token) {
+        const csrfResponse = await fetch(AUTH_API + '/auth/csrf/', { credentials: 'include', headers, signal });
         if (!csrfResponse.ok) throw new Error('Could not start a secure connection to the account service.');
-        csrfToken = (await csrfResponse.json()).csrfToken;
+        token = (await csrfResponse.json()).csrfToken;
+        if (!isLogin) csrfToken = token;
       }
       if (!(body instanceof FormData)) headers['Content-Type'] = 'application/json';
-      headers['X-CSRFToken'] = csrfToken;
+      headers['X-CSRFToken'] = token;
     }
     const response = await fetch(AUTH_API + path, {
       method,
       credentials: 'include',
       headers,
+      signal,
       body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body)
     });
-    const data = await response.json().catch(() => ({}));
+    const data = method === 'HEAD' ? {} : await response.json().catch(() => {
+      if (signal?.aborted) throw signal.reason;
+      return {};
+    });
     if (!response.ok) {
       const error = new Error(data.detail || 'The account request could not be completed.');
       error.status = response.status;
@@ -241,14 +248,22 @@
           navigate('/workspace?role=' + encodeURIComponent(result.role));
         } else {
           const result = await requestApi('/auth/login/', {
-            method: 'POST', body: { email: values.email, password: values.password }
+            method: 'POST',
+            body: { email: values.email, password: values.password },
+            signal: AbortSignal.timeout(10000)
           });
           navigate('/workspace?role=' + encodeURIComponent(result.role));
         }
       } catch (error) {
         const fieldErrors = apiFieldErrors(error.data);
         if (Object.keys(fieldErrors).length) setErrors(fieldErrors);
-        setNotice(error.data ? error.message : 'Could not connect to the account service. Start the Django backend on port 8001 and try again.');
+        if (error.name === 'TimeoutError') {
+          setNotice('The account service took too long to respond. Please try again.');
+        } else if (!isSignup && !isForgot && error.status === 403 && error.data?.code !== 'invalid_credentials') {
+          setNotice('Could not verify this sign-in. Make sure cookies are enabled and try again.');
+        } else {
+          setNotice(error.data ? error.message : 'Could not connect to the account service. Start the Django backend on port 8001 and try again.');
+        }
         setNoticeError(true);
       } finally {
         setBusy(false);
@@ -399,10 +414,16 @@
   function useParticipantSession() {
     const [state,setState]=useState({status:'loading',account:null});
     useEffect(()=>{
-      let active=true;
+      let active=true,version=0;
       const load=()=>{
-        if(!participantSessionRequest)participantSessionRequest=requestApi('/auth/me/').catch(error=>{if(error.status===401)return null;throw error;});
-        participantSessionRequest.then(account=>{if(active)setState({status:account?'ready':'signed-out',account});}).catch(()=>{if(active)setState({status:'error',account:null});});
+        const current=++version;
+        if(!participantSessionRequest){
+          const request=requestApi('/auth/me/').then(account=>account?.authenticated===true?account:null)
+            .catch(error=>{if(error.status===401)return null;throw error;});
+          participantSessionRequest=request;
+          request.finally(()=>{if(participantSessionRequest===request)participantSessionRequest=null;}).catch(()=>{});
+        }
+        participantSessionRequest.then(account=>{if(active&&current===version)setState({status:account?'ready':'signed-out',account});}).catch(()=>{if(active&&current===version)setState(previous=>previous.account?.authenticated?previous:{status:'error',account:null});});
       };
       load();window.addEventListener('talent-account-change',load);
       return()=>{active=false;window.removeEventListener('talent-account-change',load);};
@@ -467,9 +488,8 @@
     const [loadState, setLoadState] = useState(initialCompetition ? 'ready' : 'loading');
     useEffect(() => {
       if (initialCompetition || !competitionId) return;
-      const host = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
       const controller = new AbortController();
-      fetch(`http://${host}:8001/api/competitions/${encodeURIComponent(competitionId)}/`, {
+      fetch(`${AUTH_API}/competitions/${encodeURIComponent(competitionId)}/`, {
         signal: controller.signal, headers: { Accept: 'application/json' }
       }).then(async response => {
         const body = await response.json().catch(() => ({}));
@@ -864,9 +884,38 @@
 
   function App() {
     const [location, setLocation] = useState(() => ({ path: window.location.pathname.replace(/\/$/, '') || '/', search: window.location.search }));
+    const [navigationAccount, setNavigationAccount] = useState(null);
+    const isAuthenticated = navigationAccount?.authenticated === true;
+    const canAccessAdmin = isAuthenticated && navigationAccount.can_manage_discovery === true;
     useEffect(() => {
       const update = () => setLocation({ path: window.location.pathname.replace(/\/$/, '') || '/', search: window.location.search });
       window.addEventListener('popstate', update); return () => window.removeEventListener('popstate', update);
+    }, []);
+    useEffect(() => {
+      let controller;
+      function checkAccount(event) {
+        controller?.abort();
+        controller = new AbortController();
+        const { signal } = controller;
+        if (event?.type === 'talent-account-change') setNavigationAccount(null);
+        requestApi('/auth/me/', { signal }).then(async account => {
+          if (!signal.aborted && account.authenticated === true && account.can_manage_discovery === undefined) {
+            // Existing local Django instances may still serve the earlier account response.
+            account.can_manage_discovery = await requestApi('/discovery/sources/', { method: 'HEAD', signal }).then(() => true, () => false);
+          }
+          if (!signal.aborted) setNavigationAccount(account.authenticated === true ? account : null);
+        }, error => {
+          if (!signal.aborted && error.status === 401) setNavigationAccount(null);
+        });
+      }
+      checkAccount();
+      window.addEventListener('talent-account-change', checkAccount);
+      window.addEventListener('focus', checkAccount);
+      return () => {
+        controller.abort();
+        window.removeEventListener('talent-account-change', checkAccount);
+        window.removeEventListener('focus', checkAccount);
+      };
     }, []);
     const { path, search } = location;
     const competition = null;
@@ -877,7 +926,19 @@
       window.scrollTo(0, 0);
       document.getElementById('main-content')?.focus({ preventScroll: true });
     }, [path, search]);
-    const callbacks = { onOpenAuth: view => navigate(authPath(view)), onOpenSubmit: () => navigate(SUBMIT_PATH), onNavigateSection: section => navigate(sectionPaths[section] || '/') };
+    function openAuth(view) {
+      const currentView = new URLSearchParams(search).get('view');
+      if (view === 'login' && path === '/login' && !['recovery', 'reset'].includes(currentView)) {
+        const email = document.getElementById('field-email');
+        if (email) {
+          email.scrollIntoView({ block: 'center' });
+          email.focus({ preventScroll: true });
+          return;
+        }
+      }
+      navigate(authPath(view));
+    }
+    const callbacks = { onOpenAuth: openAuth, onOpenSubmit: () => navigate(SUBMIT_PATH), onNavigateSection: section => navigate(sectionPaths[section] || '/') };
     const selectContest = c => navigate('/competitions/' + c.id), selectFair = f => navigate('/job-fairs/' + f.id);
     let page;
     if (path === '/') page = <><HeroSection {...callbacks} /><ExploreCompetitionsSection onSelectContest={selectContest} /><FairUI.Home/><RankingsSection /></>;
@@ -889,16 +950,16 @@
     else if (path.startsWith('/job-fairs/')) page = <JobFairDetails key={path} id={path.split('/').filter(Boolean)[1]} />;
     else if (path === '/rankings') page = <RankingsPage />;
     else if (/^\/profiles\/\d+$/.test(path)) page = <PublicProfilePage key={path} profileId={path.split('/').pop()}/>;
-    else if (path === '/workspace') page = <WorkspacePage search={search} />;
+    else if (path === '/workspace') page = <WorkspacePage search={search} canAccessAdmin={canAccessAdmin} />;
     else if (path === '/admin') page = <AdminPage search={search} />;
     else if (path === '/help') page = <HelpPage key={search} search={search} />;
     else if (path === '/privacy' || path === '/terms') page = <PolicyPage key={path} kind={path.slice(1)} />;
     else if (path === '/preview/access-denied') page = <AccessDenied />;
     else if (path === '/preview/loading') page = <LoadingState />;
-    else if (path === '/organizer/competitions/new') page = <WorkspacePage search="?role=organizer&tab=create" />;
+    else if (path === '/organizer/competitions/new') page = <WorkspacePage search="?role=organizer&tab=create" canAccessAdmin={canAccessAdmin} />;
     else page = <NotFound />;
-    return <><a className="skip-link" href="#main-content">Skip to content</a><Navbar key={path} currentPath={path} {...callbacks} />
-      <main id="main-content" tabIndex={-1}>{page}</main><Footer {...callbacks} /></>;
+    return <><a className="skip-link" href="#main-content">Skip to content</a><Navbar key={path} currentPath={path} isAuthenticated={isAuthenticated} canAccessAdmin={canAccessAdmin} Link={Link} {...callbacks} />
+      <main id="main-content" tabIndex={-1}>{page}</main><Footer canAccessAdmin={canAccessAdmin} Link={Link} {...callbacks} /></>;
   }
   const FairUI = window.TalentSquareJobFairUI = window.createTalentSquareJobFairs({Link,Panel,Notice,requestApi});
   const { WorkspacePage, AdminPage } = window.createTalentSphereWorkspaces({

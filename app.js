@@ -1,6 +1,8 @@
 const { useState, useEffect, useMemo, useRef } = React;
-const COMPETITIONS_API_HOST = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
-const COMPETITIONS_API = 'http://' + COMPETITIONS_API_HOST + ':8001/api/competitions/';
+const LOCAL_API_HOST = window.location.hostname === 'localhost' ? 'localhost' : '127.0.0.1';
+const DJANGO_API_ORIGIN = document.documentElement.dataset.sameOriginApi === 'true'
+  ? '' : 'http://' + LOCAL_API_HOST + ':8001';
+const COMPETITIONS_API = DJANGO_API_ORIGIN + '/api/competitions/';
 
 function mapCompetitionRecord(record) {
   const category = (window.TALENTSPHERE_DATA?.categories || []).find(item => item.id === record.category);
@@ -111,7 +113,7 @@ const Icon = ({ name, className = "w-5 h-5", ...props }) => {
   );
 };
 
-const Navbar = ({ onOpenAuth, onOpenSubmit, onNavigateSection, currentPath = '/' }) => {
+const Navbar = ({ onOpenAuth, onOpenSubmit, onNavigateSection, currentPath = '/', isAuthenticated, canAccessAdmin, Link }) => {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -196,8 +198,9 @@ const Navbar = ({ onOpenAuth, onOpenSubmit, onNavigateSection, currentPath = '/'
             <button onClick={() => onNavigateSection('workspace')} className="hover:text-cyan-400 transition-colors" aria-current={currentPath === '/workspace' ? 'page' : undefined}>My workspace</button>
           </nav>
 
-          {/* Right Action Buttons (Login & Register) */}
           <div className="hidden sm:flex items-center gap-3">
+            {canAccessAdmin && <Link to="/admin" id="nav-admin-workspace" className="whitespace-nowrap text-sm font-semibold text-cyan-300 hover:text-white transition-colors" aria-current={currentPath === '/admin' ? 'page' : undefined}>Admin workspace</Link>}
+            {!isAuthenticated && <>
             <button
               onClick={() => onOpenAuth('login')}
               className="px-4 py-2 text-sm font-semibold text-slate-200 hover:text-white hover:bg-slate-800/60 border border-slate-700/80 rounded-xl transition-all cursor-pointer"
@@ -214,16 +217,17 @@ const Navbar = ({ onOpenAuth, onOpenSubmit, onNavigateSection, currentPath = '/'
             >
               Register
             </button>
+            </>}
           </div>
 
           {/* Mobile Menu Toggle */}
           <div className="flex xl:hidden items-center gap-2">
-            <button
+            {!isAuthenticated && <button
               onClick={() => onOpenAuth('login')}
                 className="sm:hidden px-3 py-1.5 text-xs font-semibold text-slate-200 border border-slate-700 rounded-lg"
             >
               Login
-            </button>
+            </button>}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="p-2 text-slate-400 hover:text-white rounded-lg bg-slate-800/60 border border-slate-700/60"
@@ -242,7 +246,8 @@ const Navbar = ({ onOpenAuth, onOpenSubmit, onNavigateSection, currentPath = '/'
             <button onClick={() => { onNavigateSection('competitions'); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 rounded-lg">Competitions</button>
             <button onClick={() => { onNavigateSection('participant'); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-slate-200 rounded-lg">Participants</button>
             <button onClick={() => { onNavigateSection('workspace'); setMobileMenuOpen(false); }} className="w-full text-left px-3 py-2 text-xs text-cyan-300 rounded-lg">My workspace</button>
-            <div className="grid grid-cols-2 gap-2 pb-2">
+            {canAccessAdmin && <Link to="/admin" id="mobile-admin-workspace" className="block w-full px-3 py-2 text-xs text-cyan-300 rounded-lg" aria-current={currentPath === '/admin' ? 'page' : undefined}>Admin workspace</Link>}
+            {!isAuthenticated && <div className="grid grid-cols-2 gap-2 pb-2">
               <button
                 onClick={() => { onOpenAuth('login'); setMobileMenuOpen(false); }}
                 className="w-full py-2.5 text-center text-xs font-bold rounded-lg bg-slate-800 text-white border border-slate-700"
@@ -255,7 +260,7 @@ const Navbar = ({ onOpenAuth, onOpenSubmit, onNavigateSection, currentPath = '/'
               >
                 Register
               </button>
-            </div>
+            </div>}
             <button
               onClick={() => { onOpenSubmit(); setMobileMenuOpen(false); }}
               className="w-full text-left px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-800/60 rounded-lg flex items-center gap-2"
@@ -1264,7 +1269,7 @@ const RankingsSection = () => {
 // =========================================================================
 // 11. FOOTER
 // =========================================================================
-const Footer = ({ onOpenAuth, onOpenSubmit, onNavigateSection }) => {
+const Footer = ({ onOpenAuth, onOpenSubmit, onNavigateSection, canAccessAdmin, Link }) => {
   return (
     <footer className="bg-[#04060b] border-t border-slate-800/80 py-12 text-xs text-slate-400">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1302,7 +1307,7 @@ const Footer = ({ onOpenAuth, onOpenSubmit, onNavigateSection }) => {
               <li><button onClick={() => onNavigateSection('participant')} className="hover:text-cyan-400">Participant workspace</button></li>
               <li><button onClick={() => onNavigateSection('organizer')} className="hover:text-cyan-400">Organizer workspace</button></li>
               <li><button onClick={() => onNavigateSection('recruiter')} className="hover:text-cyan-400">Recruiter workspace</button></li>
-              <li><button onClick={() => onNavigateSection('admin')} className="hover:text-cyan-400">Admin preview</button></li>
+              {canAccessAdmin && <li><Link to="/admin" className="hover:text-cyan-400">Admin workspace</Link></li>}
               <li><button onClick={() => onOpenAuth('forgot-password')} className="hover:text-cyan-400">Password Recovery</button></li>
             </ul>
           </div>
@@ -1330,4 +1335,4 @@ const Footer = ({ onOpenAuth, onOpenSubmit, onNavigateSection }) => {
 };
 
 
-window.TalentSphereUI = { Icon, Navbar, HeroSection, ExploreCompetitionsSection, ExploreCompetitionsPage, JobFairSection, RankingsSection, Footer };
+window.TalentSphereUI = { Icon, Navbar, HeroSection, ExploreCompetitionsSection, ExploreCompetitionsPage, JobFairSection, RankingsSection, Footer, apiOrigin: DJANGO_API_ORIGIN };

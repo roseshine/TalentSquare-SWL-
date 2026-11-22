@@ -127,7 +127,7 @@ window.createTalentSphereWorkspaces = function ({
     return <article className="work-stat"><span className="stat-icon"><Icon name={icon} className="w-5 h-5" /></span><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
   }
   function Stats({ items }) { return <div className="work-stats">{items.map(i => <Stat key={i.label} {...i} />)}</div>; }
-  function Shell({ admin = false, live = false, role, tab, menu, heading, onRoleChange, authenticated = false, allowRolePreview = false, children }) {
+  function Shell({ admin = false, live = false, role, tab, menu, heading, onRoleChange, authenticated = false, allowRolePreview = false, canAccessAdmin = false, children }) {
     const base = admin ? adminRoute : t => route(role, t);
     return <div className={'work-page ' + (admin ? 'admin-page' : '')}>
       <div className="page-container"><div className="work-breadcrumb"><Link to="/">Home</Link><span>/</span><span>{admin ? 'Admin workspace' : 'My workspace'}</span></div>
@@ -139,7 +139,8 @@ window.createTalentSphereWorkspaces = function ({
           <nav aria-label={admin ? 'Admin sections' : 'Workspace sections'} className="workspace-nav">{menu.map(([id,label,icon]) =>
             <Link key={id} to={base(id)} className={tab === id ? 'active' : ''} aria-current={tab === id ? 'page' : undefined}><Icon name={icon} className="w-4 h-4" />{label}<span aria-hidden="true">›</span></Link>)}</nav>
           <div className="workspace-sidebar-note"><Icon name="sparkles" className="w-5 h-5" /><strong>Room to grow.</strong><p>One community. Every next chapter.</p><Link to={admin ? route('participant') : '/competitions'}>{admin ? 'View member workspace' : 'Discover a challenge'} →</Link></div>
-          <Link className="work-switch" to={admin ? route('organizer') : adminRoute('live-imports')}>{admin ? 'Organizer preview' : 'Admin & live imports'} →</Link>
+          {admin && <Link className="work-switch" to={route('organizer')}>Organizer preview →</Link>}
+          {!admin && canAccessAdmin && <Link className="work-switch" to="/admin">Admin workspace →</Link>}
         </aside><div className="workspace-content">
           <div className="workspace-topline"><span className="eyebrow">{admin ? 'BEHIND THE COMMUNITY' : role.toUpperCase() + ' SPACE'}</span><span className="work-preview-pill">{live ? 'Django import service' : authenticated ? 'Django account' : 'Frontend preview'}</span></div>
           <header className="workspace-heading"><h1>{heading}</h1><p>{descriptions[tab]}</p></header>
@@ -220,7 +221,7 @@ window.createTalentSphereWorkspaces = function ({
     'University', 'College', 'School', 'Company / Corporate Organization',
     'Community Organization', 'Individual Organizer'
   ];
-  const profileMediaUrl = value => value ? 'http://' + (window.location.hostname==='localhost'?'localhost':'127.0.0.1') + ':8001' + value : '';
+  const profileMediaUrl = value => value ? window.TalentSphereUI.apiOrigin + value : '';
   function ProfileImageEditor({kind,label,account,onSaved}) {
     const [file,setFile]=useState(null),[preview,setPreview]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
     const current=account.profile?.[kind+'_url'];
@@ -532,6 +533,7 @@ window.createTalentSphereWorkspaces = function ({
   }
 
   function RealParticipantCompetitions({savedOnly=false}) {
+    const readOnlyPilot = document.documentElement.dataset.readOnlyPilot === 'true';
     const [state,setState]=useState({status:'loading',items:[]}),[section,setSection]=useState(savedOnly?'saved':'all'),[query,setQuery]=useState(''),[revision,setRevision]=useState(0),[busy,setBusy]=useState(''),[message,setMessage]=useState('');
     useEffect(()=>{
       let active=true;setState(s=>({...s,status:'loading'}));
@@ -553,10 +555,10 @@ window.createTalentSphereWorkspaces = function ({
         {message&&<p role="status">{message}</p>}
         {visible.map(item=><ListItem key={item.id} title={item.title} subtitle={[item.category,item.event_start_date?new Date(item.event_start_date).toLocaleString():'Date not provided',item.source_name||item.organizer].filter(Boolean).join(' · ')} badge={item.registration_mode==='internal'?'Internal registration':'External registration'}>
           {item.bookmark&&<p>Interested / bookmarked</p>}{item.registration&&<p>{item.registration.status_label} · {new Date(item.registration.registered_at).toLocaleString()}</p>}{item.report&&<><p>{item.report.status_label}</p><p className="small-note">{item.report.notice}</p></>}
-          <div className="work-item-actions">{item.available!==false&&<Link className="inline-link" to={'/competitions/'+item.id}>Competition details / update activity →</Link>}{item.bookmark&&<button className="button-secondary" disabled={!!busy} onClick={()=>action('bookmark-'+item.id,`/participant/competitions/${item.id}/bookmark/`,'DELETE')}>Remove bookmark</button>}
-          {item.registration?.registration_status==='active'&&new Date(item.event_start_date)>new Date()&&<button className="button-secondary" disabled={!!busy} onClick={()=>{if(window.confirm('Withdraw this registration? It cannot be reopened.'))action('registration-'+item.id,`/participant/registrations/${item.registration.id}/`,'DELETE');}}>Withdraw registration</button>}</div>
+          {!readOnlyPilot && <div className="work-item-actions">{item.available!==false&&<Link className="inline-link" to={'/competitions/'+item.id}>Competition details / update activity →</Link>}{item.bookmark&&<button className="button-secondary" disabled={!!busy} onClick={()=>action('bookmark-'+item.id,`/participant/competitions/${item.id}/bookmark/`,'DELETE')}>Remove bookmark</button>}
+          {item.registration?.registration_status==='active'&&new Date(item.event_start_date)>new Date()&&<button className="button-secondary" disabled={!!busy} onClick={()=>{if(window.confirm('Withdraw this registration? It cannot be reopened.'))action('registration-'+item.id,`/participant/registrations/${item.registration.id}/`,'DELETE');}}>Withdraw registration</button>}</div>}
         </ListItem>)}
-        {!visible.length&&<EmptyState title="No competition activity here yet" text="Explore published competitions to bookmark, register internally, or add a self-reported external status."/>}
+        {!visible.length&&<EmptyState title="No competition activity here yet" text={readOnlyPilot ? '' : 'Explore published competitions to bookmark, register internally, or add a self-reported external status.'}/>}
       </Panel></>;
   }
 
@@ -741,7 +743,7 @@ window.createTalentSphereWorkspaces = function ({
           [['Review new applicants','applicants'],['Discover promising talent','talent'],['Update your company profile','profile']]).map(([label,target])=><li key={target}><Link to={route(role,target)}>{label}<span>→</span></Link></li>)}
       </ul></Panel><Panel title="Community notes" icon="sparkles"><div className="work-activity">{db.notifications.slice(0,3).map(n=><div key={n.id}><span className="activity-dot"/><div><strong>{n.title}</strong><p>{n.body}</p></div></div>)}</div></Panel></div></>;
   }
-  function WorkspacePage({search}) {
+  function WorkspacePage({search, canAccessAdmin}) {
     const params=new URLSearchParams(search),requestedRole=['participant','organizer','recruiter'].includes(params.get('role'))?params.get('role'):'participant';
     const requestedTab=params.get('tab');
     const [db,setDb,error]=useDemoStore(),[feedback,setFeedback]=useState(null);
@@ -753,15 +755,22 @@ window.createTalentSphereWorkspaces = function ({
       let active=true,requestId=0;
       const loadAccount=async()=>{
         const currentRequest=++requestId;
-        setAccountState({status:'loading',account:null});
+        setAccountState(previous=>previous.status==='loaded'&&previous.account?.authenticated?previous:{status:'loading',account:null});
         try{
           const account=await requestApi('/auth/me/');
+          if(account?.authenticated===false){
+            if(active&&currentRequest===requestId)setAccountState({status:'signed-out',account:null});
+            return;
+          }
           if(account?.authenticated!==true||!['participant','organizer','recruiter'].includes(account.role)||!account.display_name||!account.email){
             throw new Error('The account service returned an invalid account response.');
           }
           if(active&&currentRequest===requestId)setAccountState({status:'loaded',account});
         }catch(error){
-          if(active&&currentRequest===requestId)setAccountState({status:error.status===401?'signed-out':'error',account:null});
+          if(active&&currentRequest===requestId){
+            if(error.status===401)setAccountState({status:'signed-out',account:null});
+            else setAccountState(previous=>previous.status==='loaded'&&previous.account?.authenticated?previous:{status:'error',account:null});
+          }
         }
       };
       loadAccount();
@@ -778,7 +787,10 @@ window.createTalentSphereWorkspaces = function ({
     const notify=(text,error=false)=>setFeedback({text,error});
     const props={db,setDb,notify};
     let body;
-    if(accountState.status==='loaded'&&account?.role==='participant'&&['overview','competitions','saved'].includes(tab))body=<><WorkspaceAccountSummary role={role} account={account}/><RealParticipantCompetitions key={tab} savedOnly={tab==='saved'}/></>;
+    if(accountState.status==='loaded'&&account?.role==='participant'&&['overview','competitions','saved'].includes(tab))body=<><WorkspaceAccountSummary role={role} account={account}/>
+      {document.documentElement.dataset.readOnlyPilot === 'true' && !account.profile
+        ? <Panel title="Competition activity" icon="trophy"><p>A saved participant profile is required to view competition activity.</p></Panel>
+        : <RealParticipantCompetitions key={tab} savedOnly={tab==='saved'}/>}</>;
     else if(['loading','error'].includes(accountState.status)&&role==='participant'&&['overview','competitions','saved'].includes(tab))body=<Panel title="Participant competition activity" icon="clock"><p>{accountState.status==='loading'?'Checking your Participant session?':'Account service unavailable. Reload to try again.'}</p></Panel>;
     else if(['loading','error'].includes(accountState.status)&&role==='organizer'&&tab==='participants')body=<Panel title="Organizer registrations" icon="clock"><p>{accountState.status==='loading'?'Checking your Organizer session?':'Account service unavailable. Reload to try again.'}</p></Panel>;
     else if(accountState.status==='loaded'&&account?.role==='organizer'&&tab==='participants')body=<RealOrganizerParticipants/>;
@@ -795,7 +807,7 @@ window.createTalentSphereWorkspaces = function ({
     else if(tab==='opportunities')body=<Opportunities {...props}/>;
     else if(tab==='talent')body=<Talent {...props}/>;
     const heading=tab==='overview'?(role==='participant'?'Make your next move.':role==='organizer'?'Bring your community together.':'Find your next great teammate.'):menus[role].find(([id])=>id===tab)[1];
-    return <Shell role={role} tab={tab} menu={menus[role]} heading={heading} onRoleChange={r=>navigate(route(r))} authenticated={!!account && account.role===role} allowRolePreview={accountState.status==='signed-out'}>
+    return <Shell role={role} tab={tab} menu={menus[role]} heading={heading} onRoleChange={r=>navigate(route(r))} authenticated={!!account && account.role===role} allowRolePreview={accountState.status==='signed-out'} canAccessAdmin={canAccessAdmin}>
       {error&&<Notice error>{error}</Notice>}{feedback&&<div className="workspace-feedback"><Notice error={feedback.error}>{feedback.text}</Notice><button aria-label="Dismiss update" onClick={()=>setFeedback(null)}>×</button></div>}
       <div key={role+'-'+tab}>{body}</div>
     </Shell>;
@@ -953,8 +965,8 @@ window.createTalentSphereWorkspaces = function ({
     const [reviewSource,setReviewSource]=useState('all');
     const [state,setState]=useState({status:'loading',sources:[],candidates:[],runs:[],error:''});
     const [busy,setBusy]=useState(''),[feedback,setFeedback]=useState(null),[notes,setNotes]=useState({});
-    const backendOrigin='http://'+(window.location.hostname==='localhost'?'localhost':'127.0.0.1')+':8001';
-    const djangoAdminUrl=backendOrigin+'/admin/';
+    const backendOrigin=window.TalentSphereUI.apiOrigin;
+    const djangoAdminUrl=backendOrigin ? backendOrigin+'/admin/' : '';
     const asRows=value=>Array.isArray(value)?value:Array.isArray(value?.results)?value.results:[];
     const date=value=>{
       if(!value)return 'Not checked yet';
@@ -980,8 +992,20 @@ window.createTalentSphereWorkspaces = function ({
       const query=queryParts.size?'?'+queryParts.toString():'';
       Promise.all([requestApi('/discovery/sources/'),requestApi('/discovery/candidates/'+query),requestApi('/discovery/runs/')]).then(([sources,candidates,runs])=>{
         if(active)setState({status:'ready',sources:asRows(sources),candidates:asRows(candidates),runs:asRows(runs),error:''});
-      }).catch(error=>{
-        if(active)setState(s=>({...s,status:error.status===401||error.status===403?'forbidden':'error',error:errorText(error)}));
+      }).catch(async error=>{
+        if(!active)return;
+        let status='error';
+        if(error.status===401||error.status===403){
+          // Django REST Framework can return 403 even when no session was sent.
+          try{
+            const account = await requestApi('/auth/me/');
+            status=account.authenticated===true?'forbidden':'signed-out';
+          }catch(sessionError){
+            status=sessionError.status===401?'signed-out':'error';
+            error=sessionError;
+          }
+        }
+        if(active)setState(s=>({...s,status,error:errorText(error)}));
       });
       return()=>{active=false;};
     },[filter,reviewSource,revision]);
@@ -1004,10 +1028,12 @@ window.createTalentSphereWorkspaces = function ({
       const success=action==='approve'?'Competition approved. It is now available in the public directory.':action==='apply_update'?'Source updates applied to the competition.':'Imported competition rejected.';
       mutate('candidate-'+candidate.id,'/discovery/candidates/'+candidate.id+'/',{action,review_notes},success);
     }
-    if(state.status==='forbidden')return <Panel title="Staff access is required" icon="shieldcheck">
-      <Notice error>The live importer requires a signed-in staff account with import permissions. Preview roles do not grant access.</Notice>
-      <p className="live-import-intro">Sign in with an existing authorized account, then return here. These controls use the backend database; this page does not create or elevate accounts.</p>
-      <div className="work-item-actions"><Link className="button-primary" to="/login">Go to login</Link><a className="button-secondary" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Django Admin ↗</a><button className="work-text-button" onClick={()=>setRevision(r=>r+1)}>Check access again</button></div>
+    if(state.status==='signed-out'||state.status==='forbidden')return <Panel title={state.status==='signed-out'?'Sign in to view Live Imports':'Staff access is required'} icon="shieldcheck">
+      {state.status==='signed-out'?<Notice error>Django did not recognize a signed-in session. Sign in on this site, then return to Live Imports.</Notice>:<>
+        <Notice error>Your account is signed in. Live Imports requires staff status and the Can manage competition discovery permission.</Notice>
+        <p className="live-import-intro">Ask an existing Django superuser to approve access, then check access again.</p>
+      </>}
+      <div className="work-item-actions"><Link className="button-primary" to="/login">Go to login</Link>{state.status==='forbidden'&&djangoAdminUrl&&<a className="button-secondary" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Django Admin ↗</a>}<button className="work-text-button" onClick={()=>setRevision(r=>r+1)}>Check access again</button></div>
     </Panel>;
     if(state.status==='error')return <Panel title="Import service unavailable" icon="info"><Notice error>{state.error}</Notice><p className="live-import-intro">Start the Django backend on port 8001 and check its configuration.</p><button className="button-secondary" onClick={()=>setRevision(r=>r+1)}>Try again</button></Panel>;
     return <>
@@ -1053,7 +1079,7 @@ window.createTalentSphereWorkspaces = function ({
             </ListItem>;
           })}
         </Panel>
-        <Panel title="Automatic discovery, accountable publication" icon="shieldcheck"><p>Collection intervals are used by the background worker. Keep new sources in manual review until you trust their data. Missing deadlines, eligibility, prizes, and fees stay unknown; an imported listing is not automatically a verified event.</p><a className="inline-link" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Manage source records in Django Admin ↗</a></Panel>
+        <Panel title="Automatic discovery, accountable publication" icon="shieldcheck"><p>Collection intervals are used by the background worker. Keep new sources in manual review until you trust their data. Missing deadlines, eligibility, prizes, and fees stay unknown; an imported listing is not automatically a verified event.</p>{djangoAdminUrl&&<a className="inline-link" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Manage source records in Django Admin ↗</a>}</Panel>
       </>}
       {state.status==='ready'&&section==='review'&&<Panel title="Imported competitions" icon="eye">
         <div className="work-panel-actions"><span>{state.candidates.length} candidates in this view</span><select className="form-input" aria-label="Review source" value={reviewSource} disabled={!!busy} onChange={e=>setReviewSource(e.target.value)}><option value="all">All sources</option>{state.sources.map(source=><option key={source.id} value={source.id}>{source.name}</option>)}</select><select className="form-input" aria-label="Live import review status" value={filter} disabled={!!busy} onChange={e=>setFilter(e.target.value)}>{[['pending','New imports'],['update_pending','Source updates'],['approved','Approved'],['rejected','Rejected'],['all','All statuses']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</select></div>
@@ -1106,9 +1132,10 @@ window.createTalentSphereWorkspaces = function ({
     const notify=(text,error=false)=>setFeedback({text,error}),props={db,setDb,notify};
     const content={overview:()=> <AdminOverview db={db}/>,approvals:()=> <ApprovalQueue {...props}/>,users:()=> <People {...props}/>,sources:()=> <Sources {...props}/>,
       imports:()=> <Imports {...props}/>,history:()=> <ImportHistory db={db}/>,rankings:()=> <ResultsReview {...props}/>,fairs:()=> <window.TalentSquareJobFairUI.Review/>};
-    const djangoAdminUrl='http://'+(window.location.hostname==='localhost'?'localhost':'127.0.0.1')+':8001/admin/';
+    const apiOrigin=window.TalentSphereUI.apiOrigin;
+    const djangoAdminUrl=apiOrigin ? apiOrigin+'/admin/' : '';
     return <Shell admin live={['live-imports','fairs'].includes(tab)} tab={tab} menu={adminMenu} heading={tab==='fairs'?'Job fair review':tab==='live-imports'?'Live competition imports':'Preview only · '+(tab==='overview'?'A thriving sphere starts here.':adminMenu.find(([id])=>id===tab)[1])}>
-      {!['live-imports','fairs'].includes(tab)&&<Notice error>These admin sections use sample data. Use Live imports for the real collector and import review, or Django Admin for organizer submissions. <Link className="inline-link" to={adminRoute('live-imports')}>Open Live imports →</Link><a className="inline-link" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Open Django Admin ↗</a></Notice>}
+      {!['live-imports','fairs'].includes(tab)&&<Notice error>These admin sections use sample data. Use Live imports for the real collector and import review. <Link className="inline-link" to={adminRoute('live-imports')}>Open Live imports →</Link>{djangoAdminUrl&&<a className="inline-link" href={djangoAdminUrl} target="_blank" rel="noopener noreferrer">Open Django Admin ↗</a>}</Notice>}
       {error&&<Notice error>{error}</Notice>}{feedback&&<div className="workspace-feedback"><Notice error={feedback.error}>{feedback.text}</Notice><button aria-label="Dismiss update" onClick={()=>setFeedback(null)}>×</button></div>}
       <div key={tab}>{tab==='live-imports'?<LiveImports/>:content[tab]()}</div>
     </Shell>;
